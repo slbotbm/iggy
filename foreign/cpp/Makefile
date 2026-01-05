@@ -17,11 +17,12 @@ TARGET_DIR := target/$(MODE)
 RUST_LIB := $(TARGET_DIR)/libiggy.a
 CXXBRIDGE_DIR := target/cxxbridge
 INCLUDE_DIR := $(CXXBRIDGE_DIR)
+EXAMPLES_DIR := target/examples
 
 PRODUCER_SRC := examples/producer/producer.cpp
 CONSUMER_SRC := examples/consumer/consumer.cpp
-PRODUCER_BIN := examples/producer/producer
-CONSUMER_BIN := examples/consumer/consumer
+PRODUCER_BIN := $(EXAMPLES_DIR)/producer
+CONSUMER_BIN := $(EXAMPLES_DIR)/consumer
 
 .PHONY: all rust examples producer consumer run-producer run-consumer clean
 
@@ -32,10 +33,13 @@ rust:
 
 $(RUST_LIB): rust
 
-$(PRODUCER_BIN): $(PRODUCER_SRC) $(RUST_LIB)
+$(EXAMPLES_DIR):
+	mkdir -p $@
+
+$(PRODUCER_BIN): $(PRODUCER_SRC) $(RUST_LIB) | $(EXAMPLES_DIR)
 	$(CXX) $(CXXFLAGS) $(OPT_FLAGS) -I$(INCLUDE_DIR) $< $(RUST_LIB) -lpthread -ldl -o $@
 
-$(CONSUMER_BIN): $(CONSUMER_SRC) $(RUST_LIB)
+$(CONSUMER_BIN): $(CONSUMER_SRC) $(RUST_LIB) | $(EXAMPLES_DIR)
 	$(CXX) $(CXXFLAGS) $(OPT_FLAGS) -I$(INCLUDE_DIR) $< $(RUST_LIB) -lpthread -ldl -o $@
 
 examples: producer consumer
