@@ -14,10 +14,13 @@ else
 endif
 
 TARGET_DIR := target/$(MODE)
-RUST_LIB := $(TARGET_DIR)/libiggy.a
+# Cargo replaces '-' with '_' in artifact names (iggy-cpp -> libiggy_cpp.a).
+RUST_LIB := $(TARGET_DIR)/libiggy_cpp.a
 CXXBRIDGE_DIR := target/cxxbridge
 INCLUDE_DIR := $(CXXBRIDGE_DIR)
+PUBLIC_INCLUDE_DIR := include
 EXAMPLES_DIR := target/examples
+CPP_SOURCES := src/iggy_client.cpp src/type_conversions.cpp
 
 PRODUCER_SRC := examples/producer/producer.cpp
 CONSUMER_SRC := examples/consumer/consumer.cpp
@@ -36,11 +39,11 @@ $(RUST_LIB): rust
 $(EXAMPLES_DIR):
 	mkdir -p $@
 
-$(PRODUCER_BIN): $(PRODUCER_SRC) $(RUST_LIB) | $(EXAMPLES_DIR)
-	$(CXX) $(CXXFLAGS) $(OPT_FLAGS) -I$(INCLUDE_DIR) $< $(RUST_LIB) -lpthread -ldl -o $@
+$(PRODUCER_BIN): $(PRODUCER_SRC) $(CPP_SOURCES) $(RUST_LIB) | $(EXAMPLES_DIR)
+	$(CXX) $(CXXFLAGS) $(OPT_FLAGS) -I$(PUBLIC_INCLUDE_DIR) -I$(INCLUDE_DIR) $(PRODUCER_SRC) $(CPP_SOURCES) $(RUST_LIB) -lpthread -ldl -o $@
 
-$(CONSUMER_BIN): $(CONSUMER_SRC) $(RUST_LIB) | $(EXAMPLES_DIR)
-	$(CXX) $(CXXFLAGS) $(OPT_FLAGS) -I$(INCLUDE_DIR) $< $(RUST_LIB) -lpthread -ldl -o $@
+$(CONSUMER_BIN): $(CONSUMER_SRC) $(CPP_SOURCES) $(RUST_LIB) | $(EXAMPLES_DIR)
+	$(CXX) $(CXXFLAGS) $(OPT_FLAGS) -I$(PUBLIC_INCLUDE_DIR) -I$(INCLUDE_DIR) $(CONSUMER_SRC) $(CPP_SOURCES) $(RUST_LIB) -lpthread -ldl -o $@
 
 examples: producer consumer
 

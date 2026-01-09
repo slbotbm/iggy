@@ -16,9 +16,9 @@
 # under the License.
 
 [package]
-name = "iggy"
+name = "iggy-cpp"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 crate-type = ["staticlib"]
@@ -28,7 +28,7 @@ cxx = "1.0.192"
 anyhow = "1"
 iggy = { path = "../../core/sdk" }
 iggy_common = { path = "../../core/common" }
-tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros"] }
 bytes = "1.11.0"
 
 [build-dependencies]
