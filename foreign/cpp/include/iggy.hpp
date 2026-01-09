@@ -18,6 +18,7 @@
 #pragma once
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -27,286 +28,304 @@
 
 namespace iggy {
 
-    class Identifier {
-       public:
-        enum class Kind {
-            Numeric,
-            String,
-        };
+	class IggyError final : public std::runtime_error {
+	   public:
+		IggyError(std::uint32_t code, std::string message)
+			: std::runtime_error(message), code_(code), message_(std::move(message)) {}
 
-        static Identifier numeric(std::uint32_t value);
-        static Identifier named(const std::string& value);
+		std::uint32_t code() const noexcept { return code_; }
 
-        Kind kind() const noexcept;
-        const std::vector<std::uint8_t>& value() const noexcept;
-        std::uint8_t length() const noexcept;
+		const std::string& message() const noexcept { return message_; }
 
-       private:
-        Identifier(Kind kind, std::vector<std::uint8_t> value);
+	   private:
+		std::uint32_t code_ = 0;
+		std::string message_;
+	};
 
-        Kind kind_;
-        std::vector<std::uint8_t> value_;
-    };  // class Identifier
+	class Identifier {
+	   public:
+		enum class Kind {
+			Numeric,
+			String,
+		};
 
-    enum class HeaderKind {
-        Raw = 1,
-        String = 2,
-        Bool = 3,
-        Int8 = 4,
-        Int16 = 5,
-        Int32 = 6,
-        Int64 = 7,
-        Int128 = 8,
-        Uint8 = 9,
-        Uint16 = 10,
-        Uint32 = 11,
-        Uint64 = 12,
-        Uint128 = 13,
-        Float32 = 14,
-        Float64 = 15,
-    };
+		static Identifier numeric(std::uint32_t value);
+		static Identifier named(const std::string& value);
 
-    struct HeaderValue {
-        HeaderKind kind = HeaderKind::Raw;
-        std::vector<std::uint8_t> value;
+		Kind kind() const noexcept;
+		const std::vector<std::uint8_t>& value() const noexcept;
+		std::uint8_t length() const noexcept;
 
-        std::string text() const;
-    };
+	   private:
+		Identifier(Kind kind, std::vector<std::uint8_t> value);
 
-    struct HeaderEntry {
-        std::string key;
-        HeaderValue value;
-    };
+		Kind kind_;
+		std::vector<std::uint8_t> value_;
+	};	// class Identifier
 
-    struct HeaderMap {
-        std::vector<HeaderEntry> entries;
-    };
+	enum class HeaderKind {
+		Raw = 1,
+		String = 2,
+		Bool = 3,
+		Int8 = 4,
+		Int16 = 5,
+		Int32 = 6,
+		Int64 = 7,
+		Int128 = 8,
+		Uint8 = 9,
+		Uint16 = 10,
+		Uint32 = 11,
+		Uint64 = 12,
+		Uint128 = 13,
+		Float32 = 14,
+		Float64 = 15,
+	};
 
-    struct IggyByteSize {
-        std::uint64_t value = 0;
-    };
+	struct HeaderValue {
+		HeaderKind kind = HeaderKind::Raw;
+		std::vector<std::uint8_t> value;
 
-    enum class MaxTopicSizeKind {
-        ServerDefault = 1,
-        Custom = 2,
-        Unlimited = 3,
-    };
+		std::string text() const;
+	};
 
-    struct MaxTopicSize {
-        MaxTopicSizeKind kind = MaxTopicSizeKind::ServerDefault;
-        IggyByteSize value;
-    };
+	struct HeaderEntry {
+		std::string key;
+		HeaderValue value;
+	};
 
-    struct MessageHeader {
-        std::uint64_t checksum = 0;
-        std::vector<std::uint8_t> id;
-        std::uint64_t offset = 0;
-        std::uint64_t timestamp = 0;
-        std::uint64_t origin_timestamp = 0;
-        std::uint32_t user_headers_length = 0;
-        std::uint32_t payload_length = 0;
-    };
+	struct HeaderMap {
+		std::vector<HeaderEntry> entries;
+	};
 
-    class IggyMessageBuilder;
+	struct IggyByteSize {
+		std::uint64_t value = 0;
+	};
 
-    struct IggyMessage {
-        MessageHeader message_header;
-        std::vector<std::uint8_t> payload_bytes;
-        std::string payload_text;
-        HeaderMap headers;
+	enum class MaxTopicSizeKind {
+		ServerDefault = 1,
+		Custom = 2,
+		Unlimited = 3,
+	};
 
-        static IggyMessageBuilder Builder();
+	struct MaxTopicSize {
+		MaxTopicSizeKind kind = MaxTopicSizeKind::ServerDefault;
+		IggyByteSize value;
+	};
 
-        IggyMessage& payload(std::string_view text) &;
-        IggyMessage&& payload(std::string_view text) &&;
-        IggyMessage& payload(std::vector<std::uint8_t> data) &;
-        IggyMessage&& payload(std::vector<std::uint8_t> data) &&;
+	struct MessageHeader {
+		std::uint64_t checksum = 0;
+		std::vector<std::uint8_t> id;
+		std::uint64_t offset = 0;
+		std::uint64_t timestamp = 0;
+		std::uint64_t origin_timestamp = 0;
+		std::uint32_t user_headers_length = 0;
+		std::uint32_t payload_length = 0;
+	};
 
-        MessageHeader& header() &;
-        const MessageHeader& header() const&;
-        IggyMessage& header(std::string_view key, std::string_view value) &;
-        IggyMessage&& header(std::string_view key, std::string_view value) &&;
+	class IggyMessageBuilder;
 
-        IggyMessage& user_headers(HeaderMap map) &;
-        IggyMessage&& user_headers(HeaderMap map) &&;
-    };  // struct IggyMessage
+	struct IggyMessage {
+		MessageHeader message_header;
+		std::vector<std::uint8_t> payload_bytes;
+		std::string payload_text;
+		HeaderMap headers;
 
-    class IggyMessageBuilder {
-       public:
-        IggyMessageBuilder& payload(std::string_view text) &;
-        IggyMessageBuilder&& payload(std::string_view text) &&;
-        IggyMessageBuilder& payload(std::vector<std::uint8_t> data) &;
-        IggyMessageBuilder&& payload(std::vector<std::uint8_t> data) &&;
+		static IggyMessageBuilder Builder();
 
-        IggyMessageBuilder& header(std::string_view key, std::string_view value) &;
-        IggyMessageBuilder&& header(std::string_view key, std::string_view value) &&;
-        IggyMessageBuilder& user_headers(HeaderMap map) &;
-        IggyMessageBuilder&& user_headers(HeaderMap map) &&;
+		IggyMessage& payload(std::string_view text) &;
+		IggyMessage&& payload(std::string_view text) &&;
+		IggyMessage& payload(std::vector<std::uint8_t> data) &;
+		IggyMessage&& payload(std::vector<std::uint8_t> data) &&;
 
-        IggyMessage build() &&;
-        operator IggyMessage() &&;
+		MessageHeader& header() &;
+		const MessageHeader& header() const&;
+		IggyMessage& header(std::string_view key, std::string_view value) &;
+		IggyMessage&& header(std::string_view key, std::string_view value) &&;
 
-       private:
-        IggyMessage message_;
-    };
+		IggyMessage& user_headers(HeaderMap map) &;
+		IggyMessage&& user_headers(HeaderMap map) &&;
+	};	// struct IggyMessage
 
-    enum class CompressionAlgorithm {
-        None = 1,
-        Gzip = 2,
-    };
+	class IggyMessageBuilder {
+	   public:
+		IggyMessageBuilder& payload(std::string_view text) &;
+		IggyMessageBuilder&& payload(std::string_view text) &&;
+		IggyMessageBuilder& payload(std::vector<std::uint8_t> data) &;
+		IggyMessageBuilder&& payload(std::vector<std::uint8_t> data) &&;
 
-    enum class PollingKind {
-        Offset = 1,
-        Timestamp = 2,
-        First = 3,
-        Last = 4,
-        Next = 5,
-    };
+		IggyMessageBuilder& header(std::string_view key, std::string_view value) &;
+		IggyMessageBuilder&& header(std::string_view key, std::string_view value) &&;
+		IggyMessageBuilder& user_headers(HeaderMap map) &;
+		IggyMessageBuilder&& user_headers(HeaderMap map) &&;
 
-    struct PollingStrategy {
-        PollingKind kind = PollingKind::Next;
-        std::uint64_t value = 0;
+		IggyMessage build() &&;
+		operator IggyMessage() &&;
 
-        static PollingStrategy offset(std::uint64_t offset_value);
-        static PollingStrategy timestamp(std::uint64_t timestamp_value);
-        static PollingStrategy first();
-        static PollingStrategy last();
-        static PollingStrategy next();
-    };
+	   private:
+		IggyMessage message_;
+	};
 
-    struct Partitioning {
-        explicit Partitioning(std::uint32_t id);
-        std::uint32_t partition_id = 0;
-    };
+	enum class CompressionAlgorithm {
+		None = 1,
+		Gzip = 2,
+	};
 
-    struct Partition {
-        std::uint32_t id = 0;
-        std::uint64_t created_at = 0;
-        std::uint32_t segments_count = 0;
-        std::uint64_t current_offset = 0;
-        IggyByteSize size;
-        std::uint64_t messages_count = 0;
-    };
+	enum class PollingKind {
+		Offset = 1,
+		Timestamp = 2,
+		First = 3,
+		Last = 4,
+		Next = 5,
+	};
 
-    struct Topic {
-        std::uint32_t id = 0;
-        std::uint64_t created_at = 0;
-        std::string name;
-        IggyByteSize size;
-        std::uint64_t message_expiry = 0;
-        CompressionAlgorithm compression_algorithm = CompressionAlgorithm::None;
-        MaxTopicSize max_topic_size;
-        std::uint8_t replication_factor = 0;
-        std::uint64_t messages_count = 0;
-        std::uint32_t partitions_count = 0;
-    };
+	struct PollingStrategy {
+		PollingKind kind = PollingKind::Next;
+		std::uint64_t value = 0;
 
-    struct StreamDetails {
-        std::uint32_t id = 0;
-        std::uint64_t created_at = 0;
-        std::string name;
-        IggyByteSize size;
-        std::uint64_t messages_count = 0;
-        std::uint32_t topics_count = 0;
-        std::vector<Topic> topics;
-    };
+		static PollingStrategy offset(std::uint64_t offset_value);
+		static PollingStrategy timestamp(std::uint64_t timestamp_value);
+		static PollingStrategy first();
+		static PollingStrategy last();
+		static PollingStrategy next();
+	};
 
-    struct TopicDetails {
-        std::uint32_t id = 0;
-        std::uint64_t created_at = 0;
-        std::string name;
-        IggyByteSize size;
-        std::uint64_t message_expiry = 0;
-        CompressionAlgorithm compression_algorithm = CompressionAlgorithm::None;
-        MaxTopicSize max_topic_size;
-        std::uint8_t replication_factor = 0;
-        std::uint64_t messages_count = 0;
-        std::uint32_t partitions_count = 0;
-        std::vector<Partition> partitions;
-    };
+	struct Partitioning {
+		explicit Partitioning(std::uint32_t id);
+		std::uint32_t partition_id = 0;
+	};
 
-    namespace detail {
+	struct Partition {
+		std::uint32_t id = 0;
+		std::uint64_t created_at = 0;
+		std::uint32_t segments_count = 0;
+		std::uint64_t current_offset = 0;
+		IggyByteSize size;
+		std::uint64_t messages_count = 0;
+	};
 
-        std::string rust_string_to_cpp(const ::rust::String& value);
-        ::rust::Vec<std::uint8_t> cpp_to_rust_bytes(const std::vector<std::uint8_t>& value);
-        std::vector<std::uint8_t> rust_bytes_to_cpp(const ::rust::Vec<std::uint8_t>& value);
+	struct Topic {
+		std::uint32_t id = 0;
+		std::uint64_t created_at = 0;
+		std::string name;
+		IggyByteSize size;
+		std::uint64_t message_expiry = 0;
+		CompressionAlgorithm compression_algorithm = CompressionAlgorithm::None;
+		MaxTopicSize max_topic_size;
+		std::uint8_t replication_factor = 0;
+		std::uint64_t messages_count = 0;
+		std::uint32_t partitions_count = 0;
+	};
 
-        ::iggy::ffi::FfiIdentifier cpp_to_ffi_identifier(const Identifier& identifier);
+	struct StreamDetails {
+		std::uint32_t id = 0;
+		std::uint64_t created_at = 0;
+		std::string name;
+		IggyByteSize size;
+		std::uint64_t messages_count = 0;
+		std::uint32_t topics_count = 0;
+		std::vector<Topic> topics;
+	};
 
-        ::iggy::ffi::FfiHeaderKind cpp_to_ffi_header_kind(HeaderKind kind);
-        HeaderKind ffi_header_kind_to_cpp(::iggy::ffi::FfiHeaderKind kind);
+	struct TopicDetails {
+		std::uint32_t id = 0;
+		std::uint64_t created_at = 0;
+		std::string name;
+		IggyByteSize size;
+		std::uint64_t message_expiry = 0;
+		CompressionAlgorithm compression_algorithm = CompressionAlgorithm::None;
+		MaxTopicSize max_topic_size;
+		std::uint8_t replication_factor = 0;
+		std::uint64_t messages_count = 0;
+		std::uint32_t partitions_count = 0;
+		std::vector<Partition> partitions;
+	};
 
-        ::iggy::ffi::FfiHeaderMap cpp_to_ffi_header_map(const HeaderMap& map);
-        HeaderMap ffi_header_map_to_cpp(const ::iggy::ffi::FfiHeaderMap& map);
+	namespace detail {
 
-        ::iggy::ffi::FfiPollingStrategy cpp_to_ffi_polling_strategy(const PollingStrategy& strategy);
+		std::string rust_string_to_cpp(const ::rust::String& value);
+		::rust::Vec<std::uint8_t> cpp_to_rust_bytes(const std::vector<std::uint8_t>& value);
+		std::vector<std::uint8_t> rust_bytes_to_cpp(const ::rust::Vec<std::uint8_t>& value);
 
-        ::iggy::ffi::FfiIggyMessage cpp_to_ffi_message(const IggyMessage& message);
-        IggyMessage ffi_message_to_cpp(const ::iggy::ffi::FfiIggyMessage& message);
+		::iggy::ffi::FfiIdentifier cpp_to_ffi_identifier(const Identifier& identifier);
 
-        CompressionAlgorithm ffi_compression_to_cpp(::iggy::ffi::FfiCompressionAlgorithm algorithm);
-        std::string compression_to_string(CompressionAlgorithm algorithm);
+		::iggy::ffi::FfiHeaderKind cpp_to_ffi_header_kind(HeaderKind kind);
+		HeaderKind ffi_header_kind_to_cpp(::iggy::ffi::FfiHeaderKind kind);
 
-        Partition ffi_partition_to_cpp(const ::iggy::ffi::FfiPartition& partition);
+		::iggy::ffi::FfiHeaderMap cpp_to_ffi_header_map(const HeaderMap& map);
+		HeaderMap ffi_header_map_to_cpp(const ::iggy::ffi::FfiHeaderMap& map);
 
-        Topic ffi_topic_to_cpp(const ::iggy::ffi::FfiTopic& topic);
+		::iggy::ffi::FfiPollingStrategy cpp_to_ffi_polling_strategy(const PollingStrategy& strategy);
+		::iggy::ffi::FfiIggyExpiry cpp_to_ffi_expiry(std::uint64_t expiry);
+		::iggy::ffi::FfiMaxTopicSize cpp_to_ffi_max_topic_size(const MaxTopicSize& size);
 
-        StreamDetails ffi_stream_details_to_cpp(const ::iggy::ffi::FfiStreamDetails& details);
+		::iggy::ffi::FfiIggyMessage cpp_to_ffi_message(const IggyMessage& message);
+		IggyMessage ffi_message_to_cpp(const ::iggy::ffi::FfiIggyMessage& message);
 
-        TopicDetails ffi_topic_details_to_cpp(const ::iggy::ffi::FfiTopicDetails& details);
+		CompressionAlgorithm ffi_compression_to_cpp(::iggy::ffi::FfiCompressionAlgorithm algorithm);
+		std::string compression_to_string(CompressionAlgorithm algorithm);
 
-    }  // namespace detail
+		Partition ffi_partition_to_cpp(const ::iggy::ffi::FfiPartition& partition);
 
-    class IggyClient {
-       public:
-        struct ClientBuilder {
-            IggyClient create_client(const std::string& conn = std::string()) const;
-        };
+		Topic ffi_topic_to_cpp(const ::iggy::ffi::FfiTopic& topic);
 
-        static inline const ClientBuilder Builder{};
+		StreamDetails ffi_stream_details_to_cpp(const ::iggy::ffi::FfiStreamDetails& details);
 
-        static IggyClient create_client(const std::string& conn = std::string());
+		TopicDetails ffi_topic_details_to_cpp(const ::iggy::ffi::FfiTopicDetails& details);
 
-        IggyClient(IggyClient&&) noexcept;
-        IggyClient& operator=(IggyClient&&) noexcept;
-        IggyClient(const IggyClient&) = delete;
-        IggyClient& operator=(const IggyClient&) = delete;
-        ~IggyClient();
+	}  // namespace detail
 
-        IggyClient& login_user(const std::string& username, const std::string& password) &;
-        IggyClient&& login_user(const std::string& username, const std::string& password) &&;
-        IggyClient& connect() &;
-        IggyClient&& connect() &&;
-        IggyClient& ping() &;
-        IggyClient&& ping() &&;
+	class IggyClient {
+	   public:
+		struct ClientBuilder {
+			IggyClient create_client(const std::string& conn = std::string()) const;
+		};
 
-        IggyClient& create_stream(const std::string& name) &;
-        IggyClient&& create_stream(const std::string& name) &&;
-        StreamDetails get_stream(const Identifier& stream_id);
+		static inline const ClientBuilder Builder{};
 
-        IggyClient& create_topic(const Identifier& stream, const std::string& name, std::uint32_t partitions_count,
-                                 CompressionAlgorithm compression_algorithm, std::uint8_t replication_factor) &;
-        IggyClient&& create_topic(const Identifier& stream, const std::string& name, std::uint32_t partitions_count,
-                                  CompressionAlgorithm compression_algorithm, std::uint8_t replication_factor) &&;
+		static IggyClient create_client(const std::string& conn = std::string());
 
-        TopicDetails get_topic(const Identifier& stream_id, const Identifier& topic_id);
+		IggyClient(IggyClient&&) noexcept;
+		IggyClient& operator=(IggyClient&&) noexcept;
+		IggyClient(const IggyClient&) = delete;
+		IggyClient& operator=(const IggyClient&) = delete;
+		~IggyClient();
 
-        IggyClient& send_messages(const Identifier& stream, const Identifier& topic, const Partitioning& partitioning,
-                                  const std::vector<IggyMessage>& messages) &;
-        IggyClient&& send_messages(const Identifier& stream, const Identifier& topic, const Partitioning& partitioning,
-                                   const std::vector<IggyMessage>& messages) &&;
+		IggyClient& login_user(const std::string& username, const std::string& password) &;
+		IggyClient&& login_user(const std::string& username, const std::string& password) &&;
+		IggyClient& connect() &;
+		IggyClient&& connect() &&;
+		IggyClient& ping() &;
+		IggyClient&& ping() &&;
 
-        std::vector<IggyMessage> poll_messages(const Identifier& stream, const Identifier& topic,
-                                               const Partitioning& partitioning, const PollingStrategy& strategy,
-                                               std::uint32_t count, bool auto_commit) &;
-        std::vector<IggyMessage> poll_messages(const Identifier& stream, const Identifier& topic,
-                                               const Partitioning& partitioning, const PollingStrategy& strategy,
-                                               std::uint32_t count, bool auto_commit) &&;
+		IggyClient& create_stream(const std::string& name) &;
+		IggyClient&& create_stream(const std::string& name) &&;
+		StreamDetails get_stream(const Identifier& stream_id);
 
-       private:
-        explicit IggyClient(::rust::Box<::iggy::ffi::FfiIggyClient> inner);
+		IggyClient& create_topic(const Identifier& stream, const std::string& name, std::uint32_t partitions_count,
+								 CompressionAlgorithm compression_algorithm, std::uint8_t replication_factor,
+								 std::uint64_t message_expiry = 0, MaxTopicSize max_topic_size = {}) &;
+		IggyClient&& create_topic(const Identifier& stream, const std::string& name, std::uint32_t partitions_count,
+								  CompressionAlgorithm compression_algorithm, std::uint8_t replication_factor,
+								  std::uint64_t message_expiry = 0, MaxTopicSize max_topic_size = {}) &&;
 
-        ::rust::Box<::iggy::ffi::FfiIggyClient> inner_;
-    };  // class IggyClient
+		TopicDetails get_topic(const Identifier& stream_id, const Identifier& topic_id);
+
+		IggyClient& send_messages(const Identifier& stream, const Identifier& topic, const Partitioning& partitioning,
+								  const std::vector<IggyMessage>& messages) &;
+		IggyClient&& send_messages(const Identifier& stream, const Identifier& topic, const Partitioning& partitioning,
+								   const std::vector<IggyMessage>& messages) &&;
+
+		std::vector<IggyMessage> poll_messages(const Identifier& stream, const Identifier& topic,
+											   const Partitioning& partitioning, const PollingStrategy& strategy,
+											   std::uint32_t count, bool auto_commit) &;
+		std::vector<IggyMessage> poll_messages(const Identifier& stream, const Identifier& topic,
+											   const Partitioning& partitioning, const PollingStrategy& strategy,
+											   std::uint32_t count, bool auto_commit) &&;
+
+	   private:
+		explicit IggyClient(::rust::Box<::iggy::ffi::FfiIggyClient> inner);
+
+		::rust::Box<::iggy::ffi::FfiIggyClient> inner_;
+	};	// class IggyClient
 
 }  // namespace iggy

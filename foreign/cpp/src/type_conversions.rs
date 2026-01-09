@@ -134,6 +134,32 @@ pub(crate) fn ffi_polling_strategy_to_rust(
     }
 }
 
+pub(crate) fn ffi_expiry_to_rust(
+    expiry: &ffi::FfiIggyExpiry,
+) -> Result<RustIggyExpiry, RustIggyError> {
+    match expiry.kind {
+        ffi::FfiIggyExpiryKind::ServerDefault => Ok(RustIggyExpiry::ServerDefault),
+        ffi::FfiIggyExpiryKind::ExpireDuration => {
+            Ok(RustIggyExpiry::ExpireDuration(expiry.value.into()))
+        }
+        ffi::FfiIggyExpiryKind::NeverExpire => Ok(RustIggyExpiry::NeverExpire),
+        _ => Err(RustIggyError::InvalidFormat),
+    }
+}
+
+pub(crate) fn ffi_max_topic_size_to_rust(
+    size: &ffi::FfiMaxTopicSize,
+) -> Result<RustMaxTopicSize, RustIggyError> {
+    match size.kind {
+        ffi::FfiMaxTopicSizeKind::ServerDefault => Ok(RustMaxTopicSize::ServerDefault),
+        ffi::FfiMaxTopicSizeKind::Unlimited => Ok(RustMaxTopicSize::Unlimited),
+        ffi::FfiMaxTopicSizeKind::Custom => Ok(RustMaxTopicSize::Custom(
+            RustIggyByteSize::from(size.value.value),
+        )),
+        _ => Err(RustIggyError::InvalidFormat),
+    }
+}
+
 fn rust_timestamp_to_ffi(
     timestamp: RustIggyTimestamp,
 ) -> Result<ffi::FfiIggyTimestamp, RustIggyError> {

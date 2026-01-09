@@ -221,6 +221,8 @@ mod ffi {
             partitions_count: u32,
             compression_algorithm: &str,
             replication_factor: u8,
+            message_expiry: &FfiIggyExpiry,
+            max_topic_size: &FfiMaxTopicSize,
         ) -> Result<()>;
         fn get_topic(
             self: &FfiIggyClient,
@@ -248,7 +250,7 @@ mod ffi {
 
 impl fmt::Display for ffi::FfiIggyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}", self.message)
+        write!(formatter, "{}: {}", self.code, self.message)
     }
 }
 
@@ -329,6 +331,8 @@ impl FfiIggyClient {
         partitions_count: u32,
         compression_algorithm: &str,
         replication_factor: u8,
+        message_expiry: &ffi::FfiIggyExpiry,
+        max_topic_size: &ffi::FfiMaxTopicSize,
     ) -> Result<(), ffi::FfiIggyError> {
         let stream = type_conversions::ffi_identifier_to_rust(stream)?;
         let compression = if compression_algorithm.is_empty() {
@@ -337,6 +341,9 @@ impl FfiIggyClient {
             CompressionAlgorithm::from_str(compression_algorithm)
                 .map_err(|_| RustIggyError::InvalidFormat)?
         };
+
+        let message_expiry = type_conversions::ffi_expiry_to_rust(message_expiry)?;
+        let max_topic_size = type_conversions::ffi_max_topic_size_to_rust(max_topic_size)?;
 
         let replication = if replication_factor == 0 {
             None
@@ -352,8 +359,8 @@ impl FfiIggyClient {
                     partitions_count,
                     compression,
                     replication,
-                    IggyExpiry::NeverExpire,
-                    MaxTopicSize::ServerDefault,
+                    message_expiry,
+                    max_topic_size,
                 )
                 .await
         })?;
