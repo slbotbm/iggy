@@ -14,7 +14,6 @@ else
 endif
 
 TARGET_DIR := target/$(MODE)
-# Cargo replaces '-' with '_' in artifact names (iggy-cpp -> libiggy_cpp.a).
 RUST_LIB := $(TARGET_DIR)/libiggy_cpp.a
 CXXBRIDGE_DIR := target/cxxbridge
 INCLUDE_DIR := $(CXXBRIDGE_DIR)

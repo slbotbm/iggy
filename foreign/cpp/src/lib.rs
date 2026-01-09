@@ -19,8 +19,10 @@ mod type_conversions;
 
 use iggy::prelude::{
     Consumer as RustConsumer, IggyClient as RustIggyClient,
-    IggyClientBuilder as RustIggyClientBuilder, IggyMessage as RustIggyMessage, *,
+    IggyClientBuilder as RustIggyClientBuilder, IggyError as RustIggyError,
+    IggyMessage as RustIggyMessage, *,
 };
+use std::fmt;
 use std::result::Result;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
@@ -53,13 +55,47 @@ mod ffi {
         Float64 = 15,
     }
 
+    enum FfiIdKind {
+        Numeric = 1,
+        String = 2,
+    }
+
+    enum FfiCompressionAlgorithm {
+        None = 1,
+        Gzip = 2,
+    }
+
+    enum FfiIggyExpiryKind {
+        ServerDefault = 1,
+        ExpireDuration = 2,
+        NeverExpire = 3,
+    }
+
+    enum FfiMaxTopicSizeKind {
+        ServerDefault = 1,
+        Custom = 2,
+        Unlimited = 3,
+    }
+
+    enum FfiPollingKind {
+        Offset = 1,
+        Timestamp = 2,
+        First = 3,
+        Last = 4,
+        Next = 5,
+    }
+
     struct FfiHeaderValue {
         kind: FfiHeaderKind,
         value: Vec<u8>,
     }
 
+    struct FfiHeaderKey {
+        value: String,
+    }
+
     struct FfiHeaderEntry {
-        key: String,
+        key: FfiHeaderKey,
         value: FfiHeaderValue,
     }
 
@@ -77,28 +113,28 @@ mod ffi {
         payload_length: u32,
     }
 
-    enum FfiIdentifierKind {
-        Numeric = 1,
-        String = 2,
-    }
-
     struct FfiIdentifier {
-        kind: FfiIdentifierKind,
+        kind: FfiIdKind,
         length: u8,
         value: Vec<u8>,
     }
 
-    enum FfiCompressionAlgorithm {
-        None = 1,
-        Gzip = 2,
+    struct FfiIggyExpiry {
+        kind: FfiIggyExpiryKind,
+        value: u64,
     }
 
-    enum FfiPollingKind {
-        Offset = 1,
-        Timestamp = 2,
-        First = 3,
-        Last = 4,
-        Next = 5,
+    struct FfiIggyTimestamp {
+        value: u64,
+    }
+
+    struct FfiIggyByteSize {
+        value: u64,
+    }
+
+    struct FfiMaxTopicSize {
+        kind: FfiMaxTopicSizeKind,
+        value: FfiIggyByteSize,
     }
 
     struct FfiPollingStrategy {
@@ -114,21 +150,21 @@ mod ffi {
 
     struct FfiPartition {
         id: u32,
-        created_at: u64,
+        created_at: FfiIggyTimestamp,
         segments_count: u32,
         current_offset: u64,
-        size_bytes: u64,
+        size: FfiIggyByteSize,
         messages_count: u64,
     }
 
     struct FfiTopic {
         id: u32,
-        created_at: u64,
+        created_at: FfiIggyTimestamp,
         name: String,
-        size_bytes: u64,
-        message_expiry: u64,
+        size: FfiIggyByteSize,
+        message_expiry: FfiIggyExpiry,
         compression_algorithm: FfiCompressionAlgorithm,
-        max_topic_size: u64,
+        max_topic_size: FfiMaxTopicSize,
         replication_factor: u8,
         messages_count: u64,
         partitions_count: u32,
@@ -136,9 +172,9 @@ mod ffi {
 
     struct FfiStreamDetails {
         id: u32,
-        created_at: u64,
+        created_at: FfiIggyTimestamp,
         name: String,
-        size_bytes: u64,
+        size: FfiIggyByteSize,
         messages_count: u64,
         topics_count: u32,
         topics: Vec<FfiTopic>,
@@ -146,34 +182,40 @@ mod ffi {
 
     struct FfiTopicDetails {
         id: u32,
-        created_at: u64,
+        created_at: FfiIggyTimestamp,
         name: String,
-        size_bytes: u64,
-        message_expiry: u64,
+        size: FfiIggyByteSize,
+        message_expiry: FfiIggyExpiry,
         compression_algorithm: FfiCompressionAlgorithm,
-        max_topic_size: u64,
+        max_topic_size: FfiMaxTopicSize,
         replication_factor: u8,
         messages_count: u64,
         partitions_count: u32,
         partitions: Vec<FfiPartition>,
     }
 
+    struct FfiIggyError {
+        code: u32,
+        message: String,
+    }
+
     extern "Rust" {
-        type IggyClient;
+        type FfiIggyClient;
 
-        fn create_client(conn: &str) -> Result<Box<IggyClient>>;
+        // analogous to new()
+        fn create_client(conn: &str) -> Result<Box<FfiIggyClient>>;
 
-        fn login_user(self: &IggyClient, username: &str, password: &str) -> Result<()>;
-        fn connect(self: &IggyClient) -> Result<()>;
-        fn ping(self: &IggyClient) -> Result<()>;
+        fn login_user(self: &FfiIggyClient, username: &str, password: &str) -> Result<()>;
+        fn connect(self: &FfiIggyClient) -> Result<()>;
+        fn ping(self: &FfiIggyClient) -> Result<()>;
 
-        fn create_stream(self: &IggyClient, name: &str) -> Result<()>;
+        fn create_stream(self: &FfiIggyClient, name: &str) -> Result<()>;
         fn get_stream(
-            self: &IggyClient,
+            self: &FfiIggyClient,
             stream_id: &FfiIdentifier,
         ) -> Result<Box<FfiStreamDetails>>;
         fn create_topic(
-            self: &IggyClient,
+            self: &FfiIggyClient,
             stream: &FfiIdentifier,
             name: &str,
             partitions_count: u32,
@@ -181,19 +223,19 @@ mod ffi {
             replication_factor: u8,
         ) -> Result<()>;
         fn get_topic(
-            self: &IggyClient,
+            self: &FfiIggyClient,
             stream_id: &FfiIdentifier,
             topic_id: &FfiIdentifier,
         ) -> Result<Box<FfiTopicDetails>>;
         fn send_messages(
-            self: &IggyClient,
+            self: &FfiIggyClient,
             stream: &FfiIdentifier,
             topic: &FfiIdentifier,
             partitioning: u32,
             messages: &Vec<FfiIggyMessage>,
         ) -> Result<()>;
         fn poll_messages(
-            self: &IggyClient,
+            self: &FfiIggyClient,
             stream: &FfiIdentifier,
             topic: &FfiIdentifier,
             partition_id: u32,
@@ -204,11 +246,26 @@ mod ffi {
     }
 }
 
-pub struct IggyClient {
+impl fmt::Display for ffi::FfiIggyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.message)
+    }
+}
+
+impl From<RustIggyError> for ffi::FfiIggyError {
+    fn from(error: RustIggyError) -> Self {
+        Self {
+            code: error.as_code(),
+            message: error.to_string(),
+        }
+    }
+}
+
+pub struct FfiIggyClient {
     inner: Arc<RustIggyClient>,
 }
 
-fn create_client(conn: &str) -> Result<Box<IggyClient>, Box<dyn std::error::Error>> {
+fn create_client(conn: &str) -> Result<Box<FfiIggyClient>, ffi::FfiIggyError> {
     let conn = if conn.is_empty() {
         "127.0.0.1:8090".to_string()
     } else {
@@ -218,42 +275,34 @@ fn create_client(conn: &str) -> Result<Box<IggyClient>, Box<dyn std::error::Erro
     let client = RustIggyClientBuilder::new()
         .with_tcp()
         .with_server_address(conn)
-        .build()
-        .unwrap();
-    Ok(Box::new(IggyClient {
+        .build()?;
+
+    Ok(Box::new(FfiIggyClient {
         inner: Arc::new(client),
     }))
 }
 
-impl IggyClient {
-    fn login_user(&self, username: &str, password: &str) -> Result<(), Box<dyn std::error::Error>> {
-        RUNTIME
-            .block_on(async { self.inner.login_user(username, password).await })
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+impl FfiIggyClient {
+    fn login_user(&self, username: &str, password: &str) -> Result<(), ffi::FfiIggyError> {
+        RUNTIME.block_on(async { self.inner.login_user(username, password).await })?;
 
         Ok(())
     }
 
-    fn connect(&self) -> Result<(), Box<dyn std::error::Error>> {
-        RUNTIME
-            .block_on(async { self.inner.connect().await })
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    fn connect(&self) -> Result<(), ffi::FfiIggyError> {
+        RUNTIME.block_on(async { self.inner.connect().await })?;
 
         Ok(())
     }
 
-    fn ping(&self) -> Result<(), Box<dyn std::error::Error>> {
-        RUNTIME
-            .block_on(async { self.inner.ping().await })
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    fn ping(&self) -> Result<(), ffi::FfiIggyError> {
+        RUNTIME.block_on(async { self.inner.ping().await })?;
 
         Ok(())
     }
 
-    fn create_stream(&self, name: &str) -> Result<(), Box<dyn std::error::Error>> {
-        RUNTIME
-            .block_on(async { self.inner.create_stream(name).await })
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    fn create_stream(&self, name: &str) -> Result<(), ffi::FfiIggyError> {
+        RUNTIME.block_on(async { self.inner.create_stream(name).await })?;
 
         Ok(())
     }
@@ -261,14 +310,16 @@ impl IggyClient {
     fn get_stream(
         &self,
         stream_id: &ffi::FfiIdentifier,
-    ) -> Result<Box<ffi::FfiStreamDetails>, Box<dyn std::error::Error>> {
+    ) -> Result<Box<ffi::FfiStreamDetails>, ffi::FfiIggyError> {
         let stream_id = type_conversions::ffi_identifier_to_rust(stream_id)?;
-        let details = RUNTIME
-            .block_on(async { self.inner.get_stream(&stream_id).await })
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        let details = RUNTIME.block_on(async { self.inner.get_stream(&stream_id).await })?;
 
-        let details = details.ok_or("Stream not found")?;
-        Ok(Box::new(type_conversions::rust_stream_details_to_ffi(&details)))
+        let details =
+            details.ok_or_else(|| RustIggyError::ResourceNotFound("stream".to_string()))?;
+
+        Ok(Box::new(type_conversions::rust_stream_details_to_ffi(
+            &details,
+        )?))
     }
 
     fn create_topic(
@@ -278,13 +329,13 @@ impl IggyClient {
         partitions_count: u32,
         compression_algorithm: &str,
         replication_factor: u8,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), ffi::FfiIggyError> {
         let stream = type_conversions::ffi_identifier_to_rust(stream)?;
         let compression = if compression_algorithm.is_empty() {
             CompressionAlgorithm::default()
         } else {
             CompressionAlgorithm::from_str(compression_algorithm)
-                .map_err(|_| Box::<dyn std::error::Error>::from("Invalid compression algorithm"))?
+                .map_err(|_| RustIggyError::InvalidFormat)?
         };
 
         let replication = if replication_factor == 0 {
@@ -293,21 +344,19 @@ impl IggyClient {
             Some(replication_factor)
         };
 
-        RUNTIME
-            .block_on(async {
-                self.inner
-                    .create_topic(
-                        &stream,
-                        name,
-                        partitions_count,
-                        compression,
-                        replication,
-                        IggyExpiry::NeverExpire,
-                        MaxTopicSize::ServerDefault,
-                    )
-                    .await
-            })
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        RUNTIME.block_on(async {
+            self.inner
+                .create_topic(
+                    &stream,
+                    name,
+                    partitions_count,
+                    compression,
+                    replication,
+                    IggyExpiry::NeverExpire,
+                    MaxTopicSize::ServerDefault,
+                )
+                .await
+        })?;
 
         Ok(())
     }
@@ -316,24 +365,26 @@ impl IggyClient {
         &self,
         stream_id: &ffi::FfiIdentifier,
         topic_id: &ffi::FfiIdentifier,
-    ) -> Result<Box<ffi::FfiTopicDetails>, Box<dyn std::error::Error>> {
+    ) -> Result<Box<ffi::FfiTopicDetails>, ffi::FfiIggyError> {
         let stream_id = type_conversions::ffi_identifier_to_rust(stream_id)?;
         let topic_id = type_conversions::ffi_identifier_to_rust(topic_id)?;
-        let details = RUNTIME
-            .block_on(async { self.inner.get_topic(&stream_id, &topic_id).await })
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        let details =
+            RUNTIME.block_on(async { self.inner.get_topic(&stream_id, &topic_id).await })?;
 
-        let details = details.ok_or("Topic not found")?;
-        Ok(Box::new(type_conversions::rust_topic_details_to_ffi(&details)))
+        let details =
+            details.ok_or_else(|| RustIggyError::ResourceNotFound("topic".to_string()))?;
+        Ok(Box::new(type_conversions::rust_topic_details_to_ffi(
+            &details,
+        )?))
     }
 
     fn send_messages(
-        self: &IggyClient,
+        &self,
         stream: &ffi::FfiIdentifier,
         topic: &ffi::FfiIdentifier,
         partitioning: u32,
         messages: &Vec<ffi::FfiIggyMessage>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), ffi::FfiIggyError> {
         let stream = type_conversions::ffi_identifier_to_rust(stream)?;
         let topic = type_conversions::ffi_identifier_to_rust(topic)?;
         let partitioning = Partitioning::partition_id(partitioning);
@@ -342,13 +393,11 @@ impl IggyClient {
             rust_messages.push(type_conversions::ffi_message_to_rust(message)?);
         }
 
-        RUNTIME
-            .block_on(async {
-                self.inner
-                    .send_messages(&stream, &topic, &partitioning, &mut rust_messages)
-                    .await
-            })
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        RUNTIME.block_on(async {
+            self.inner
+                .send_messages(&stream, &topic, &partitioning, &mut rust_messages)
+                .await
+        })?;
 
         Ok(())
     }
@@ -361,26 +410,24 @@ impl IggyClient {
         polling_strategy: &ffi::FfiPollingStrategy,
         count: u32,
         auto_commit: bool,
-    ) -> Result<Vec<ffi::FfiIggyMessage>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<ffi::FfiIggyMessage>, ffi::FfiIggyError> {
         let stream = type_conversions::ffi_identifier_to_rust(stream)?;
         let topic = type_conversions::ffi_identifier_to_rust(topic)?;
         let consumer = RustConsumer::default();
         let strategy = type_conversions::ffi_polling_strategy_to_rust(polling_strategy)?;
-        let polled_messages = RUNTIME
-            .block_on(async {
-                self.inner
-                    .poll_messages(
-                        &stream,
-                        &topic,
-                        Some(partition_id),
-                        &consumer,
-                        &strategy,
-                        count,
-                        auto_commit,
-                    )
-                    .await
-            })
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        let polled_messages = RUNTIME.block_on(async {
+            self.inner
+                .poll_messages(
+                    &stream,
+                    &topic,
+                    Some(partition_id),
+                    &consumer,
+                    &strategy,
+                    count,
+                    auto_commit,
+                )
+                .await
+        })?;
 
         let mut messages = Vec::with_capacity(polled_messages.messages.len());
         for message in &polled_messages.messages {
