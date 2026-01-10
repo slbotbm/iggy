@@ -1,331 +1,121 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
-//
-//   http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
-
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
-#include <stdexcept>
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
+#include <variant>
 #include <vector>
 
-#include "iggy-cpp/src/lib.rs.h"
 #include "rust/cxx.h"
+#include "iggy-cpp/src/lib.rs.h"
 
 namespace iggy {
+	using CompressionAlgorithm = iggy::ffi::FfiCompressionAlgorithm;
+	using StreamDetails = iggy::ffi::FfiStreamDetails;
+	using TopicDetails = iggy::ffi::FfiTopicDetails;
+	using Message = iggy::ffi::FfiIggyMessage;
+	using PollingStrategy = iggy::ffi::FfiPollingStrategy;
 
-	class IggyError final : public std::runtime_error {
-	   public:
-		IggyError(std::uint32_t code, std::string message)
-			: std::runtime_error(message), code_(code), message_(std::move(message)) {}
+	struct HeaderValue {
+		iggy::ffi::FfiHeaderKind kind;
+		std::vector<uint8_t> bytes;
 
-		std::uint32_t code() const noexcept { return code_; }
+		static HeaderValue Raw(const std::vector<uint8_t>& bytes);
+		static HeaderValue String(std::string_view value);
+		static HeaderValue Bool(bool value);
+		static HeaderValue Int8(int8_t value);
+		static HeaderValue Int16(int16_t value);
+		static HeaderValue Int32(int32_t value);
+		static HeaderValue Int64(int64_t value);
+		static HeaderValue Int128(const std::array<uint8_t, 16>& bytes);
+		static HeaderValue Uint8(uint8_t value);
+		static HeaderValue Uint16(uint16_t value);
+		static HeaderValue Uint32(uint32_t value);
+		static HeaderValue Uint64(uint64_t value);
+		static HeaderValue Uint128(const std::array<uint8_t, 16>& bytes);
+		static HeaderValue Float(float value);
+		static HeaderValue Double(double value);
+		static HeaderValue FromBytes(iggy::ffi::FfiHeaderKind kind, const std::vector<uint8_t>& bytes);
+	};
 
-		const std::string& message() const noexcept { return message_; }
+	struct Result {
+		bool success;
+		std::string error_message;
 
-	   private:
-		std::uint32_t code_ = 0;
-		std::string message_;
+		static Result Ok() { return {true, ""}; }
+		static Result Error(const std::string& msg) { return {false, msg}; }
+		bool ok() const { return success; }
 	};
 
 	class Identifier {
 	   public:
-		enum class Kind {
-			Numeric,
-			String,
-		};
-
-		static Identifier numeric(std::uint32_t value);
-		static Identifier named(const std::string& value);
-
-		Kind kind() const noexcept;
-		const std::vector<std::uint8_t>& value() const noexcept;
-		std::uint8_t length() const noexcept;
-
-	   private:
-		Identifier(Kind kind, std::vector<std::uint8_t> value);
-
-		Kind kind_;
-		std::vector<std::uint8_t> value_;
-	};	// class Identifier
-
-	enum class HeaderKind {
-		Raw = 1,
-		String = 2,
-		Bool = 3,
-		Int8 = 4,
-		Int16 = 5,
-		Int32 = 6,
-		Int64 = 7,
-		Int128 = 8,
-		Uint8 = 9,
-		Uint16 = 10,
-		Uint32 = 11,
-		Uint64 = 12,
-		Uint128 = 13,
-		Float32 = 14,
-		Float64 = 15,
+		static iggy::ffi::FfiIdentifier from_id(uint32_t id);
+		static iggy::ffi::FfiIdentifier from_name(const std::string& name);
 	};
 
-	struct HeaderValue {
-		HeaderKind kind = HeaderKind::Raw;
-		std::vector<std::uint8_t> value;
+	class MessageBuilder {
+		iggy::ffi::FfiIggyMessage msg_;
 
-		std::string text() const;
-	};
-
-	struct HeaderEntry {
-		std::string key;
-		HeaderValue value;
-	};
-
-	struct HeaderMap {
-		std::vector<HeaderEntry> entries;
-	};
-
-	struct IggyByteSize {
-		std::uint64_t value = 0;
-	};
-
-	enum class MaxTopicSizeKind {
-		ServerDefault = 1,
-		Custom = 2,
-		Unlimited = 3,
-	};
-
-	struct MaxTopicSize {
-		MaxTopicSizeKind kind = MaxTopicSizeKind::ServerDefault;
-		IggyByteSize value;
-	};
-
-	struct MessageHeader {
-		std::uint64_t checksum = 0;
-		std::vector<std::uint8_t> id;
-		std::uint64_t offset = 0;
-		std::uint64_t timestamp = 0;
-		std::uint64_t origin_timestamp = 0;
-		std::uint32_t user_headers_length = 0;
-		std::uint32_t payload_length = 0;
-	};
-
-	class IggyMessageBuilder;
-
-	struct IggyMessage {
-		MessageHeader message_header;
-		std::vector<std::uint8_t> payload_bytes;
-		std::string payload_text;
-		HeaderMap headers;
-
-		static IggyMessageBuilder Builder();
-
-		IggyMessage& payload(std::string_view text) &;
-		IggyMessage&& payload(std::string_view text) &&;
-		IggyMessage& payload(std::vector<std::uint8_t> data) &;
-		IggyMessage&& payload(std::vector<std::uint8_t> data) &&;
-
-		MessageHeader& header() &;
-		const MessageHeader& header() const&;
-		IggyMessage& header(std::string_view key, std::string_view value) &;
-		IggyMessage&& header(std::string_view key, std::string_view value) &&;
-
-		IggyMessage& user_headers(HeaderMap map) &;
-		IggyMessage&& user_headers(HeaderMap map) &&;
-	};	// struct IggyMessage
-
-	class IggyMessageBuilder {
 	   public:
-		IggyMessageBuilder& payload(std::string_view text) &;
-		IggyMessageBuilder&& payload(std::string_view text) &&;
-		IggyMessageBuilder& payload(std::vector<std::uint8_t> data) &;
-		IggyMessageBuilder&& payload(std::vector<std::uint8_t> data) &&;
-
-		IggyMessageBuilder& header(std::string_view key, std::string_view value) &;
-		IggyMessageBuilder&& header(std::string_view key, std::string_view value) &&;
-		IggyMessageBuilder& user_headers(HeaderMap map) &;
-		IggyMessageBuilder&& user_headers(HeaderMap map) &&;
-
-		IggyMessage build() &&;
-		operator IggyMessage() &&;
-
-	   private:
-		IggyMessage message_;
+		MessageBuilder();
+		MessageBuilder& payload(const std::string& data);
+		MessageBuilder& payload(const std::vector<uint8_t>& data);
+		MessageBuilder& user_headers(const std::unordered_map<std::string, HeaderValue>& headers);
+		iggy::ffi::FfiIggyMessage build();
 	};
 
-	enum class CompressionAlgorithm {
-		None = 1,
-		Gzip = 2,
-	};
+	class MessageBatchBuilder {
+		rust::Vec<Message> messages_;
 
-	enum class PollingKind {
-		Offset = 1,
-		Timestamp = 2,
-		First = 3,
-		Last = 4,
-		Next = 5,
-	};
-
-	struct PollingStrategy {
-		PollingKind kind = PollingKind::Next;
-		std::uint64_t value = 0;
-
-		static PollingStrategy offset(std::uint64_t offset_value);
-		static PollingStrategy timestamp(std::uint64_t timestamp_value);
-		static PollingStrategy first();
-		static PollingStrategy last();
-		static PollingStrategy next();
-	};
-
-	struct Partitioning {
-		explicit Partitioning(std::uint32_t id);
-		std::uint32_t partition_id = 0;
-	};
-
-	struct Partition {
-		std::uint32_t id = 0;
-		std::uint64_t created_at = 0;
-		std::uint32_t segments_count = 0;
-		std::uint64_t current_offset = 0;
-		IggyByteSize size;
-		std::uint64_t messages_count = 0;
-	};
-
-	struct Topic {
-		std::uint32_t id = 0;
-		std::uint64_t created_at = 0;
-		std::string name;
-		IggyByteSize size;
-		std::uint64_t message_expiry = 0;
-		CompressionAlgorithm compression_algorithm = CompressionAlgorithm::None;
-		MaxTopicSize max_topic_size;
-		std::uint8_t replication_factor = 0;
-		std::uint64_t messages_count = 0;
-		std::uint32_t partitions_count = 0;
-	};
-
-	struct StreamDetails {
-		std::uint32_t id = 0;
-		std::uint64_t created_at = 0;
-		std::string name;
-		IggyByteSize size;
-		std::uint64_t messages_count = 0;
-		std::uint32_t topics_count = 0;
-		std::vector<Topic> topics;
-	};
-
-	struct TopicDetails {
-		std::uint32_t id = 0;
-		std::uint64_t created_at = 0;
-		std::string name;
-		IggyByteSize size;
-		std::uint64_t message_expiry = 0;
-		CompressionAlgorithm compression_algorithm = CompressionAlgorithm::None;
-		MaxTopicSize max_topic_size;
-		std::uint8_t replication_factor = 0;
-		std::uint64_t messages_count = 0;
-		std::uint32_t partitions_count = 0;
-		std::vector<Partition> partitions;
-	};
-
-	namespace detail {
-
-		std::string rust_string_to_cpp(const ::rust::String& value);
-		::rust::Vec<std::uint8_t> cpp_to_rust_bytes(const std::vector<std::uint8_t>& value);
-		std::vector<std::uint8_t> rust_bytes_to_cpp(const ::rust::Vec<std::uint8_t>& value);
-
-		::iggy::ffi::FfiIdentifier cpp_to_ffi_identifier(const Identifier& identifier);
-
-		::iggy::ffi::FfiHeaderKind cpp_to_ffi_header_kind(HeaderKind kind);
-		HeaderKind ffi_header_kind_to_cpp(::iggy::ffi::FfiHeaderKind kind);
-
-		::iggy::ffi::FfiHeaderMap cpp_to_ffi_header_map(const HeaderMap& map);
-		HeaderMap ffi_header_map_to_cpp(const ::iggy::ffi::FfiHeaderMap& map);
-
-		::iggy::ffi::FfiPollingStrategy cpp_to_ffi_polling_strategy(const PollingStrategy& strategy);
-		::iggy::ffi::FfiIggyExpiry cpp_to_ffi_expiry(std::uint64_t expiry);
-		::iggy::ffi::FfiMaxTopicSize cpp_to_ffi_max_topic_size(const MaxTopicSize& size);
-
-		::iggy::ffi::FfiIggyMessage cpp_to_ffi_message(const IggyMessage& message);
-		IggyMessage ffi_message_to_cpp(const ::iggy::ffi::FfiIggyMessage& message);
-
-		CompressionAlgorithm ffi_compression_to_cpp(::iggy::ffi::FfiCompressionAlgorithm algorithm);
-		std::string compression_to_string(CompressionAlgorithm algorithm);
-
-		Partition ffi_partition_to_cpp(const ::iggy::ffi::FfiPartition& partition);
-
-		Topic ffi_topic_to_cpp(const ::iggy::ffi::FfiTopic& topic);
-
-		StreamDetails ffi_stream_details_to_cpp(const ::iggy::ffi::FfiStreamDetails& details);
-
-		TopicDetails ffi_topic_details_to_cpp(const ::iggy::ffi::FfiTopicDetails& details);
-
-	}  // namespace detail
-
-	class IggyClient {
 	   public:
-		struct ClientBuilder {
-			IggyClient create_client(const std::string& conn = std::string()) const;
-		};
+		MessageBatchBuilder() = default;
+		MessageBatchBuilder& reserve(size_t count);
+		MessageBatchBuilder& add(const Message& message);
+		MessageBatchBuilder& add(Message&& message);
+		rust::Vec<Message> build();
+	};
 
-		static inline const ClientBuilder Builder{};
+	class Client {
+	   public:
+		Client() = delete;
+		~Client();
 
-		static IggyClient create_client(const std::string& conn = std::string());
+		static std::pair<std::unique_ptr<Client>, Result> create(const std::string& conn_str);
 
-		IggyClient(IggyClient&&) noexcept;
-		IggyClient& operator=(IggyClient&&) noexcept;
-		IggyClient(const IggyClient&) = delete;
-		IggyClient& operator=(const IggyClient&) = delete;
-		~IggyClient();
+		Result connect();
+		Result ping();
+		Result login_user(const std::string& username, const std::string& password);
 
-		IggyClient& login_user(const std::string& username, const std::string& password) &;
-		IggyClient&& login_user(const std::string& username, const std::string& password) &&;
-		IggyClient& connect() &;
-		IggyClient&& connect() &&;
-		IggyClient& ping() &;
-		IggyClient&& ping() &&;
+		Result create_stream(const std::string& name);
+		std::pair<std::optional<StreamDetails>, Result> get_stream(const iggy::ffi::FfiIdentifier& stream_id);
 
-		IggyClient& create_stream(const std::string& name) &;
-		IggyClient&& create_stream(const std::string& name) &&;
-		StreamDetails get_stream(const Identifier& stream_id);
+		Result create_topic(const iggy::ffi::FfiIdentifier& stream_id, const std::string& name,
+							uint32_t partitions_count, CompressionAlgorithm compression = CompressionAlgorithm::None,
+							uint8_t replication_factor = 0,
+							iggy::ffi::FfiIggyExpiry expiry = {iggy::ffi::FfiIggyExpiryKind::ServerDefault, 0},
+							iggy::ffi::FfiMaxTopicSize max_size = {iggy::ffi::FfiMaxTopicSizeKind::ServerDefault, {0}});
 
-		IggyClient& create_topic(const Identifier& stream, const std::string& name, std::uint32_t partitions_count,
-								 CompressionAlgorithm compression_algorithm, std::uint8_t replication_factor,
-								 std::uint64_t message_expiry = 0, MaxTopicSize max_topic_size = {}) &;
-		IggyClient&& create_topic(const Identifier& stream, const std::string& name, std::uint32_t partitions_count,
-								  CompressionAlgorithm compression_algorithm, std::uint8_t replication_factor,
-								  std::uint64_t message_expiry = 0, MaxTopicSize max_topic_size = {}) &&;
+		std::pair<std::optional<TopicDetails>, Result> get_topic(const iggy::ffi::FfiIdentifier& stream_id,
+																 const iggy::ffi::FfiIdentifier& topic_id);
 
-		TopicDetails get_topic(const Identifier& stream_id, const Identifier& topic_id);
+		Result send_messages(const iggy::ffi::FfiIdentifier& stream_id, const iggy::ffi::FfiIdentifier& topic_id,
+							 uint32_t partitioning, const std::vector<Message>& messages);
+		Result send_messages(const iggy::ffi::FfiIdentifier& stream_id, const iggy::ffi::FfiIdentifier& topic_id,
+							 uint32_t partitioning, rust::Vec<Message> messages);
 
-		IggyClient& send_messages(const Identifier& stream, const Identifier& topic, const Partitioning& partitioning,
-								  const std::vector<IggyMessage>& messages) &;
-		IggyClient&& send_messages(const Identifier& stream, const Identifier& topic, const Partitioning& partitioning,
-								   const std::vector<IggyMessage>& messages) &&;
-
-		std::vector<IggyMessage> poll_messages(const Identifier& stream, const Identifier& topic,
-											   const Partitioning& partitioning, const PollingStrategy& strategy,
-											   std::uint32_t count, bool auto_commit) &;
-		std::vector<IggyMessage> poll_messages(const Identifier& stream, const Identifier& topic,
-											   const Partitioning& partitioning, const PollingStrategy& strategy,
-											   std::uint32_t count, bool auto_commit) &&;
+		std::pair<std::vector<Message>, Result> poll_messages(const iggy::ffi::FfiIdentifier& stream_id,
+															  const iggy::ffi::FfiIdentifier& topic_id,
+															  uint32_t partition_id, const PollingStrategy& strategy,
+															  uint32_t count, bool auto_commit);
 
 	   private:
-		explicit IggyClient(::rust::Box<::iggy::ffi::FfiIggyClient> inner);
-
-		::rust::Box<::iggy::ffi::FfiIggyClient> inner_;
-	};	// class IggyClient
-
+		rust::Box<iggy::ffi::IggyClient> inner_;
+		explicit Client(rust::Box<iggy::ffi::IggyClient> inner);
+	};
 }  // namespace iggy

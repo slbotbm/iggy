@@ -1,227 +1,315 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
-//
-//   http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
-
-#include <charconv>
-#include <system_error>
+#include <cstring>
+#include <cstdint>
+#include <iostream>
+#include <limits>
+#include <stdexcept>
 #include <utility>
+#include <vector>
+
+namespace {
+template <typename T>
+std::vector<uint8_t> to_le_bytes(T value) {
+	std::vector<uint8_t> bytes(sizeof(T));
+	for (size_t i = 0; i < bytes.size(); ++i) {
+		bytes[i] = static_cast<uint8_t>((value >> (i * 8)) & 0xFF);
+	}
+	return bytes;
+}
+}  // namespace
 
 #include "iggy.hpp"
 
 namespace iggy {
-
-	namespace {
-
-		IggyError make_iggy_error(const ::rust::Error& error) {
-			std::string message = error.what();
-			std::uint32_t code = 0;
-
-			auto delimiter = message.find(':');
-			if (delimiter != std::string::npos) {
-				auto code_view = std::string_view(message.data(), delimiter);
-				std::uint32_t parsed = 0;
-				auto result = std::from_chars(code_view.data(), code_view.data() + code_view.size(), parsed);
-				if (result.ec == std::errc() && result.ptr == code_view.data() + code_view.size()) {
-					code = parsed;
-					message.erase(0, delimiter + 1);
-					if (!message.empty() && message.front() == ' ') {
-						message.erase(0, 1);
-					}
-				}
-			}
-
-			return IggyError(code, std::move(message));
-		}
-
-	}  // namespace
-
-	IggyClient IggyClient::ClientBuilder::create_client(const std::string& conn) const {
-		return IggyClient::create_client(conn);
+	HeaderValue HeaderValue::Raw(const std::vector<uint8_t>& bytes) {
+		return {iggy::ffi::FfiHeaderKind::Raw, bytes};
 	}
 
-	IggyClient IggyClient::create_client(const std::string& conn) {
-		try {
-			auto client = ::iggy::ffi::create_client(::rust::Str(conn));
-			return IggyClient(std::move(client));
-		} catch (const ::rust::Error& error) {
-			throw make_iggy_error(error);
-		}
+	HeaderValue HeaderValue::String(std::string_view value) {
+		return {iggy::ffi::FfiHeaderKind::String, std::vector<uint8_t>(value.begin(), value.end())};
 	}
 
-	IggyClient::IggyClient(::rust::Box<::iggy::ffi::FfiIggyClient> inner) : inner_(std::move(inner)) {}
+	HeaderValue HeaderValue::Bool(bool value) {
+		return {iggy::ffi::FfiHeaderKind::Bool, std::vector<uint8_t>{static_cast<uint8_t>(value ? 1 : 0)}};
+	}
 
-	IggyClient::IggyClient(IggyClient&&) noexcept = default;
+	HeaderValue HeaderValue::Int8(int8_t value) {
+		return {iggy::ffi::FfiHeaderKind::Int8, {static_cast<uint8_t>(value)}};
+	}
 
-	IggyClient& IggyClient::operator=(IggyClient&&) noexcept = default;
+	HeaderValue HeaderValue::Int16(int16_t value) {
+		return {iggy::ffi::FfiHeaderKind::Int16, to_le_bytes(static_cast<uint16_t>(value))};
+	}
 
-	IggyClient::~IggyClient() = default;
+	HeaderValue HeaderValue::Int32(int32_t value) {
+		return {iggy::ffi::FfiHeaderKind::Int32, to_le_bytes(static_cast<uint32_t>(value))};
+	}
 
-	IggyClient& IggyClient::login_user(const std::string& username, const std::string& password) & {
-		try {
-			inner_->login_user(::rust::Str(username), ::rust::Str(password));
-		} catch (const ::rust::Error& error) {
-			throw make_iggy_error(error);
+	HeaderValue HeaderValue::Int64(int64_t value) {
+		return {iggy::ffi::FfiHeaderKind::Int64, to_le_bytes(static_cast<uint64_t>(value))};
+	}
+
+	HeaderValue HeaderValue::Int128(const std::array<uint8_t, 16>& bytes) {
+		return {iggy::ffi::FfiHeaderKind::Int128, std::vector<uint8_t>(bytes.begin(), bytes.end())};
+	}
+
+	HeaderValue HeaderValue::Uint8(uint8_t value) {
+		return {iggy::ffi::FfiHeaderKind::Uint8, {value}};
+	}
+
+	HeaderValue HeaderValue::Uint16(uint16_t value) {
+		return {iggy::ffi::FfiHeaderKind::Uint16, to_le_bytes(value)};
+	}
+
+	HeaderValue HeaderValue::Uint32(uint32_t value) {
+		return {iggy::ffi::FfiHeaderKind::Uint32, to_le_bytes(value)};
+	}
+
+	HeaderValue HeaderValue::Uint64(uint64_t value) {
+		return {iggy::ffi::FfiHeaderKind::Uint64, to_le_bytes(value)};
+	}
+
+	HeaderValue HeaderValue::Uint128(const std::array<uint8_t, 16>& bytes) {
+		return {iggy::ffi::FfiHeaderKind::Uint128, std::vector<uint8_t>(bytes.begin(), bytes.end())};
+	}
+
+	HeaderValue HeaderValue::Float(float value) {
+		static_assert(sizeof(float) == 4, "float must be 4 bytes");
+		uint32_t bits = 0;
+		std::memcpy(&bits, &value, sizeof(bits));
+		return {iggy::ffi::FfiHeaderKind::Float32, to_le_bytes(bits)};
+	}
+
+	HeaderValue HeaderValue::Double(double value) {
+		static_assert(sizeof(double) == 8, "double must be 8 bytes");
+		uint64_t bits = 0;
+		std::memcpy(&bits, &value, sizeof(bits));
+		return {iggy::ffi::FfiHeaderKind::Float64, to_le_bytes(bits)};
+	}
+
+	HeaderValue HeaderValue::FromBytes(iggy::ffi::FfiHeaderKind kind, const std::vector<uint8_t>& bytes) {
+		return {kind, bytes};
+	}
+
+	iggy::ffi::FfiIdentifier Identifier::from_id(uint32_t id) {
+		iggy::ffi::FfiIdentifier ident;
+		ident.kind = iggy::ffi::FfiIdKind::Numeric;
+		ident.length = 4;
+
+		ident.value.reserve(4);
+		ident.value.push_back(static_cast<uint8_t>(id & 0xFF));
+		ident.value.push_back(static_cast<uint8_t>((id >> 8) & 0xFF));
+		ident.value.push_back(static_cast<uint8_t>((id >> 16) & 0xFF));
+		ident.value.push_back(static_cast<uint8_t>((id >> 24) & 0xFF));
+
+		return ident;
+	}
+
+	iggy::ffi::FfiIdentifier Identifier::from_name(const std::string& name) {
+		if (name.empty() || name.size() > std::numeric_limits<uint8_t>::max()) {
+			throw std::invalid_argument("Identifier name must be 1..255 bytes.");
 		}
+
+		iggy::ffi::FfiIdentifier ident;
+		ident.kind = iggy::ffi::FfiIdKind::String;
+		ident.length = static_cast<uint8_t>(name.size());
+
+		ident.value.reserve(name.size());
+		for (char c : name) {
+			ident.value.push_back(static_cast<uint8_t>(c));
+		}
+		return ident;
+	}
+
+	MessageBuilder::MessageBuilder() {
+		msg_.header.id.reserve(16);
+		for (int i = 0; i < 16; ++i) {
+			msg_.header.id.push_back(0);
+		}
+		msg_.header.payload_length = 0;
+	}
+
+	MessageBuilder& MessageBuilder::payload(const std::string& data) {
+		std::vector<uint8_t> bytes(data.begin(), data.end());
+		return payload(bytes);
+	}
+
+	MessageBuilder& MessageBuilder::payload(const std::vector<uint8_t>& data) {
+		msg_.payload.clear();
+		msg_.payload.reserve(data.size());
+		for (auto b : data) msg_.payload.push_back(b);
+		msg_.header.payload_length = static_cast<uint32_t>(data.size());
 		return *this;
 	}
 
-	IggyClient&& IggyClient::login_user(const std::string& username, const std::string& password) && {
-		static_cast<IggyClient&>(*this).login_user(username, password);
-		return std::move(*this);
+	MessageBuilder& MessageBuilder::user_headers(const std::unordered_map<std::string, HeaderValue>& headers) {
+		msg_.headers.entries.clear();
+		msg_.headers.entries.reserve(headers.size());
+
+		for (const auto& [key, value] : headers) {
+			if (key.empty() || key.size() > std::numeric_limits<uint8_t>::max()) {
+				throw std::invalid_argument("Header key must be 1..255 bytes.");
+			}
+			if (value.bytes.empty() || value.bytes.size() > std::numeric_limits<uint8_t>::max()) {
+				throw std::invalid_argument("Header value must be 1..255 bytes.");
+			}
+
+			iggy::ffi::FfiHeaderEntry entry;
+			entry.key.value = key;
+			entry.value.kind = value.kind;
+			entry.value.value.reserve(value.bytes.size());
+			for (auto byte : value.bytes) {
+				entry.value.value.push_back(byte);
+			}
+			msg_.headers.entries.push_back(entry);
+		}
+
+		return *this;
 	}
 
-	IggyClient& IggyClient::connect() & {
+	iggy::ffi::FfiIggyMessage MessageBuilder::build() {
+		return msg_;
+	}
+
+	MessageBatchBuilder& MessageBatchBuilder::reserve(size_t count) {
+		messages_.reserve(count);
+		return *this;
+	}
+
+	MessageBatchBuilder& MessageBatchBuilder::add(const Message& message) {
+		messages_.push_back(message);
+		return *this;
+	}
+
+	MessageBatchBuilder& MessageBatchBuilder::add(Message&& message) {
+		messages_.push_back(std::move(message));
+		return *this;
+	}
+
+	rust::Vec<Message> MessageBatchBuilder::build() {
+		return std::move(messages_);
+	}
+
+	Client::Client(rust::Box<iggy::ffi::IggyClient> inner) : inner_(std::move(inner)) {}
+
+	Client::~Client() = default;
+
+	std::pair<std::unique_ptr<Client>, Result> Client::create(const std::string& conn_str) {
+		try {
+			auto rust_box = iggy::ffi::create_client(conn_str);
+			return {std::unique_ptr<Client>(new Client(std::move(rust_box))), Result::Ok()};
+		} catch (const rust::Error& e) {
+			return {nullptr, Result::Error(e.what())};
+		}
+	}
+
+	Result Client::connect() {
 		try {
 			inner_->connect();
-		} catch (const ::rust::Error& error) {
-			throw make_iggy_error(error);
+			return Result::Ok();
+		} catch (const rust::Error& e) {
+			return Result::Error(e.what());
 		}
-		return *this;
 	}
 
-	IggyClient&& IggyClient::connect() && {
-		static_cast<IggyClient&>(*this).connect();
-		return std::move(*this);
+	Result Client::login_user(const std::string& username, const std::string& password) {
+		try {
+			inner_->login_user(username, password);
+			return Result::Ok();
+		} catch (const rust::Error& e) {
+			return Result::Error(e.what());
+		}
 	}
 
-	IggyClient& IggyClient::ping() & {
+	Result Client::ping() {
 		try {
 			inner_->ping();
-		} catch (const ::rust::Error& error) {
-			throw make_iggy_error(error);
+			return Result::Ok();
+		} catch (const rust::Error& e) {
+			return Result::Error(e.what());
 		}
-		return *this;
 	}
 
-	IggyClient&& IggyClient::ping() && {
-		static_cast<IggyClient&>(*this).ping();
-		return std::move(*this);
-	}
-
-	IggyClient& IggyClient::create_stream(const std::string& name) & {
+	Result Client::create_stream(const std::string& name) {
 		try {
-			inner_->create_stream(::rust::Str(name));
-		} catch (const ::rust::Error& error) {
-			throw make_iggy_error(error);
+			inner_->create_stream(name);
+			return Result::Ok();
+		} catch (const rust::Error& e) {
+			return Result::Error(e.what());
 		}
-		return *this;
 	}
 
-	IggyClient&& IggyClient::create_stream(const std::string& name) && {
-		static_cast<IggyClient&>(*this).create_stream(name);
-		return std::move(*this);
-	}
-
-	StreamDetails IggyClient::get_stream(const Identifier& stream_id) {
-		auto ffi_id = detail::cpp_to_ffi_identifier(stream_id);
+	std::pair<std::optional<StreamDetails>, Result> Client::get_stream(const iggy::ffi::FfiIdentifier& stream_id) {
 		try {
-			auto details = inner_->get_stream(ffi_id);
-			return detail::ffi_stream_details_to_cpp(*details);
-		} catch (const ::rust::Error& error) {
-			throw make_iggy_error(error);
+			auto details = inner_->get_stream(stream_id);
+			return {details, Result::Ok()};
+		} catch (const rust::Error& e) {
+			return {std::nullopt, Result::Error(e.what())};
 		}
 	}
 
-	IggyClient& IggyClient::create_topic(const Identifier& stream, const std::string& name,
-										 std::uint32_t partitions_count, CompressionAlgorithm compression_algorithm,
-										 std::uint8_t replication_factor, std::uint64_t message_expiry,
-										 MaxTopicSize max_topic_size) & {
-		auto compression = detail::compression_to_string(compression_algorithm);
-		auto ffi_stream = detail::cpp_to_ffi_identifier(stream);
-		auto ffi_expiry = detail::cpp_to_ffi_expiry(message_expiry);
-		auto ffi_max_topic_size = detail::cpp_to_ffi_max_topic_size(max_topic_size);
+	Result Client::create_topic(const iggy::ffi::FfiIdentifier& stream_id, const std::string& name,
+								uint32_t partitions_count, CompressionAlgorithm compression, uint8_t replication_factor,
+								iggy::ffi::FfiIggyExpiry expiry, iggy::ffi::FfiMaxTopicSize max_size) {
 		try {
-			inner_->create_topic(ffi_stream, ::rust::Str(name), partitions_count, ::rust::Str(compression),
-								 replication_factor, ffi_expiry, ffi_max_topic_size);
-		} catch (const ::rust::Error& error) {
-			throw make_iggy_error(error);
+			inner_->create_topic(stream_id, name, partitions_count, compression, replication_factor, expiry, max_size);
+			return Result::Ok();
+		} catch (const rust::Error& e) {
+			return Result::Error(e.what());
 		}
-		return *this;
 	}
 
-	IggyClient&& IggyClient::create_topic(const Identifier& stream, const std::string& name,
-										  std::uint32_t partitions_count, CompressionAlgorithm compression_algorithm,
-										  std::uint8_t replication_factor, std::uint64_t message_expiry,
-										  MaxTopicSize max_topic_size) && {
-		static_cast<IggyClient&>(*this).create_topic(stream, name, partitions_count, compression_algorithm,
-													 replication_factor, message_expiry, max_topic_size);
-		return std::move(*this);
-	}
-
-	TopicDetails IggyClient::get_topic(const Identifier& stream_id, const Identifier& topic_id) {
-		auto ffi_stream = detail::cpp_to_ffi_identifier(stream_id);
-		auto ffi_topic = detail::cpp_to_ffi_identifier(topic_id);
+	std::pair<std::optional<TopicDetails>, Result> Client::get_topic(const iggy::ffi::FfiIdentifier& stream_id,
+																	 const iggy::ffi::FfiIdentifier& topic_id) {
 		try {
-			auto details = inner_->get_topic(ffi_stream, ffi_topic);
-			return detail::ffi_topic_details_to_cpp(*details);
-		} catch (const ::rust::Error& error) {
-			throw make_iggy_error(error);
+			auto details = inner_->get_topic(stream_id, topic_id);
+			return {details, Result::Ok()};
+		} catch (const rust::Error& e) {
+			return {std::nullopt, Result::Error(e.what())};
 		}
 	}
 
-	IggyClient& IggyClient::send_messages(const Identifier& stream, const Identifier& topic,
-										  const Partitioning& partitioning,
-										  const std::vector<IggyMessage>& messages) & {
-		auto ffi_stream = detail::cpp_to_ffi_identifier(stream);
-		auto ffi_topic = detail::cpp_to_ffi_identifier(topic);
-		::rust::Vec<::iggy::ffi::FfiIggyMessage> ffi_messages;
-		ffi_messages.reserve(messages.size());
-		for (const auto& message : messages) {
-			ffi_messages.push_back(detail::cpp_to_ffi_message(message));
-		}
+	Result Client::send_messages(const iggy::ffi::FfiIdentifier& stream_id, const iggy::ffi::FfiIdentifier& topic_id,
+								 uint32_t partitioning, const std::vector<Message>& messages) {
 		try {
-			inner_->send_messages(ffi_stream, ffi_topic, partitioning.partition_id, ffi_messages);
-		} catch (const ::rust::Error& error) {
-			throw make_iggy_error(error);
-		}
-		return *this;
-	}
-
-	IggyClient&& IggyClient::send_messages(const Identifier& stream, const Identifier& topic,
-										   const Partitioning& partitioning,
-										   const std::vector<IggyMessage>& messages) && {
-		static_cast<IggyClient&>(*this).send_messages(stream, topic, partitioning, messages);
-		return std::move(*this);
-	}
-	std::vector<IggyMessage> IggyClient::poll_messages(const Identifier& stream, const Identifier& topic,
-													   const Partitioning& partitioning,
-													   const PollingStrategy& strategy, std::uint32_t count,
-													   bool auto_commit) & {
-		auto ffi_stream = detail::cpp_to_ffi_identifier(stream);
-		auto ffi_topic = detail::cpp_to_ffi_identifier(topic);
-		auto ffi_strategy = detail::cpp_to_ffi_polling_strategy(strategy);
-		try {
-			auto messages = inner_->poll_messages(ffi_stream, ffi_topic, partitioning.partition_id, ffi_strategy, count,
-												  auto_commit);
-			std::vector<IggyMessage> out;
-			out.reserve(messages.size());
+			rust::Vec<Message> rust_messages;
+			rust_messages.reserve(messages.size());
 			for (const auto& message : messages) {
-				out.push_back(detail::ffi_message_to_cpp(message));
+				rust_messages.push_back(message);
 			}
-			return out;
-		} catch (const ::rust::Error& error) {
-			throw make_iggy_error(error);
+			inner_->send_messages(stream_id, topic_id, partitioning, std::move(rust_messages));
+			return Result::Ok();
+		} catch (const rust::Error& e) {
+			return Result::Error(e.what());
 		}
 	}
 
-	std::vector<IggyMessage> IggyClient::poll_messages(const Identifier& stream, const Identifier& topic,
-													   const Partitioning& partitioning,
-													   const PollingStrategy& strategy, std::uint32_t count,
-													   bool auto_commit) && {
-		return static_cast<IggyClient&>(*this).poll_messages(stream, topic, partitioning, strategy, count, auto_commit);
+	Result Client::send_messages(const iggy::ffi::FfiIdentifier& stream_id, const iggy::ffi::FfiIdentifier& topic_id,
+								 uint32_t partitioning, rust::Vec<Message> messages) {
+		try {
+			inner_->send_messages(stream_id, topic_id, partitioning, std::move(messages));
+			return Result::Ok();
+		} catch (const rust::Error& e) {
+			return Result::Error(e.what());
+		}
+	}
+
+	std::pair<std::vector<Message>, Result> Client::poll_messages(const iggy::ffi::FfiIdentifier& stream_id,
+																  const iggy::ffi::FfiIdentifier& topic_id,
+																  uint32_t partition_id,
+																  const PollingStrategy& strategy, uint32_t count,
+																  bool auto_commit) {
+		try {
+			auto msgs_rust = inner_->poll_messages(stream_id, topic_id, partition_id, strategy, count, auto_commit);
+			std::vector<Message> msgs_cpp;
+			msgs_cpp.reserve(msgs_rust.size());
+			for (auto& m : msgs_rust) {
+				msgs_cpp.push_back(m);
+			}
+
+			return {msgs_cpp, Result::Ok()};
+		} catch (const rust::Error& e) {
+			return {{}, Result::Error(e.what())};
+		}
 	}
 
 }  // namespace iggy

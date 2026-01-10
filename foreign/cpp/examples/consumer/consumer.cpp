@@ -1,70 +1,161 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
-//
-//   http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
-
 #include <cstdint>
+#include <cstring>
+#include <exception>
+#include <iomanip>
 #include <iostream>
-#include <stdexcept>
+#include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "iggy.hpp"
 
+namespace {
+std::string bytes_to_hex(const rust::Vec<uint8_t>& bytes) {
+	std::ostringstream out;
+	out << "0x";
+	out << std::hex << std::setfill('0');
+	for (uint8_t byte : bytes) {
+		out << std::setw(2) << static_cast<int>(byte);
+	}
+	return out.str();
+}
+
+template <typename T>
+bool read_le(const rust::Vec<uint8_t>& bytes, T& out_value) {
+	if (bytes.size() != sizeof(T)) {
+		return false;
+	}
+	using Unsigned = typename std::make_unsigned<T>::type;
+	Unsigned value = 0;
+	for (size_t i = 0; i < sizeof(T); ++i) {
+		value |= static_cast<Unsigned>(static_cast<Unsigned>(bytes[i]) << (i * 8));
+	}
+	std::memcpy(&out_value, &value, sizeof(out_value));
+	return true;
+}
+
+std::string format_header_value(const iggy::ffi::FfiHeaderValue& value) {
+	switch (value.kind) {
+		case iggy::ffi::FfiHeaderKind::Raw:
+			return bytes_to_hex(value.value);
+		case iggy::ffi::FfiHeaderKind::String:
+			return std::string(value.value.begin(), value.value.end());
+		case iggy::ffi::FfiHeaderKind::Bool:
+			return (!value.value.empty() && value.value[0] != 0) ? "true" : "false";
+		case iggy::ffi::FfiHeaderKind::Int8:
+			return value.value.empty() ? "" : std::to_string(static_cast<int8_t>(value.value[0]));
+		case iggy::ffi::FfiHeaderKind::Int16: {
+			int16_t v = 0;
+			return read_le<int16_t>(value.value, v) ? std::to_string(v) : bytes_to_hex(value.value);
+		}
+		case iggy::ffi::FfiHeaderKind::Int32: {
+			int32_t v = 0;
+			return read_le<int32_t>(value.value, v) ? std::to_string(v) : bytes_to_hex(value.value);
+		}
+		case iggy::ffi::FfiHeaderKind::Int64: {
+			int64_t v = 0;
+			return read_le<int64_t>(value.value, v) ? std::to_string(v) : bytes_to_hex(value.value);
+		}
+		case iggy::ffi::FfiHeaderKind::Int128:
+			return bytes_to_hex(value.value);
+		case iggy::ffi::FfiHeaderKind::Uint8:
+			return value.value.empty() ? "" : std::to_string(value.value[0]);
+		case iggy::ffi::FfiHeaderKind::Uint16: {
+			uint16_t v = 0;
+			return read_le<uint16_t>(value.value, v) ? std::to_string(v) : bytes_to_hex(value.value);
+		}
+		case iggy::ffi::FfiHeaderKind::Uint32: {
+			uint32_t v = 0;
+			return read_le<uint32_t>(value.value, v) ? std::to_string(v) : bytes_to_hex(value.value);
+		}
+		case iggy::ffi::FfiHeaderKind::Uint64: {
+			uint64_t v = 0;
+			return read_le<uint64_t>(value.value, v) ? std::to_string(v) : bytes_to_hex(value.value);
+		}
+		case iggy::ffi::FfiHeaderKind::Uint128:
+			return bytes_to_hex(value.value);
+		case iggy::ffi::FfiHeaderKind::Float32: {
+			uint32_t bits = 0;
+			if (!read_le<uint32_t>(value.value, bits)) {
+				return bytes_to_hex(value.value);
+			}
+			float f = 0.0f;
+			std::memcpy(&f, &bits, sizeof(f));
+			return std::to_string(f);
+		}
+		case iggy::ffi::FfiHeaderKind::Float64: {
+			uint64_t bits = 0;
+			if (!read_le<uint64_t>(value.value, bits)) {
+				return bytes_to_hex(value.value);
+			}
+			double d = 0.0;
+			std::memcpy(&d, &bits, sizeof(d));
+			return std::to_string(d);
+		}
+	}
+
+	return bytes_to_hex(value.value);
+}
+}  // namespace
+
 int main() {
-    try {
-        std::string address = "127.0.0.1:8090";
-        std::string stream = "example-stream";
-        std::string topic = "example-topic";
-        std::string username = "iggy";
-        std::string password = "iggy";
-        std::uint32_t count = 10;
-        std::uint32_t stream_count = 5;
-        std::uint32_t partitions_per_stream = 2;
+	const std::string address = "127.0.0.1:8090";
+	const std::string stream = "example-stream";
+	const std::string topic = "example-topic";
+	const int count = 5;
 
-        auto client = iggy::IggyClient::Builder.create_client(address).connect().login_user(username, password);
+	auto [client, result] = iggy::Client::create(address);
+	if (!result.ok() || !client) {
+		std::cerr << "Failed to create client: " << result.error_message << "\n";
+		return 1;
+	}
 
-        auto topic_id = iggy::Identifier::named(topic);
+	result = client->connect();
+	if (!result.ok()) {
+		std::cerr << "Failed to connect: " << result.error_message << "\n";
+		return 1;
+	}
 
-        auto strategy = iggy::PollingStrategy::next();
+	result = client->login_user("iggy", "iggy");
+	if (!result.ok()) {
+		std::cerr << "Login failed: " << result.error_message << "\n";
+		return 1;
+	}
 
-        std::uint32_t total_partitions = stream_count * partitions_per_stream;
-        std::uint32_t messages_per_partition = count / total_partitions;
+	iggy::ffi::FfiIdentifier stream_id;
+	iggy::ffi::FfiIdentifier topic_id;
+	try {
+		stream_id = iggy::Identifier::from_name(stream);
+		topic_id = iggy::Identifier::from_name(topic);
+	} catch (const std::exception& e) {
+		std::cerr << "Invalid stream/topic identifier: " << e.what() << "\n";
+		return 1;
+	}
 
-        for (std::uint32_t stream_index = 0; stream_index < stream_count; ++stream_index) {
-            std::string stream_name = stream + "-" + std::to_string(stream_index + 1);
-            auto stream_id = iggy::Identifier::named(stream_name);
+	iggy::PollingStrategy strategy{iggy::ffi::FfiPollingKind::Next, 0};
+	auto [messages, poll_result] =
+		client->poll_messages(stream_id, topic_id, 0, strategy, static_cast<uint32_t>(count), true);
+	if (!poll_result.ok()) {
+		std::cerr << "Poll messages failed: " << poll_result.error_message << "\n";
+		return 1;
+	}
 
-            for (std::uint32_t partition_id = 0; partition_id < partitions_per_stream; ++partition_id) {
-                auto messages = client.poll_messages(stream_id, topic_id, iggy::Partitioning(partition_id), strategy,
-                                                     messages_per_partition, true);
+	if (messages.empty()) {
+		std::cout << "No messages available.\n";
+		return 0;
+	}
 
-                std::cout << "Polled " << messages.size() << " messages from " << stream_name << "/" << topic
-                          << " partition " << partition_id << ".\n";
-                for (std::size_t i = 0; i < messages.size(); ++i) {
-                    const auto& message = messages[i];
-                    std::cout << "message[" << i << "]: " << message.payload_text << '\n';
-                    for (const auto& header : message.headers.entries) {
-                        std::cout << "  header[" << header.key << "]: " << header.value.text() << '\n';
-                    }
-                }
-            }
-        }
-        return 0;
-    } catch (const std::exception& err) {
-        std::cerr << "Error: " << err.what() << '\n';
-    }
-    return 1;
+	for (const auto& message : messages) {
+		std::string payload(message.payload.begin(), message.payload.end());
+		std::cout << payload << "\n";
+		if (!message.headers.entries.empty()) {
+			std::cout << "headers:\n";
+			for (const auto& entry : message.headers.entries) {
+				std::cout << "  " << entry.key.value << ": " << format_header_value(entry.value) << "\n";
+			}
+		}
+	}
+
+	return 0;
 }

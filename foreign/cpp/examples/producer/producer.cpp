@@ -1,82 +1,77 @@
-// Licensed to the Apache Software Foundation (ASF) under one
-// or more contributor license agreements.  See the NOTICE file
-// distributed with this work for additional information
-// regarding copyright ownership.  The ASF licenses this file
-// to you under the Apache License, Version 2.0 (the
-// "License"); you may not use this file except in compliance
-// with the License.  You may obtain a copy of the License at
-//
-//   http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing,
-// software distributed under the License is distributed on an
-// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-// KIND, either express or implied.  See the License for the
-// specific language governing permissions and limitations
-// under the License.
-
-#include <cstdint>
+#include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "iggy.hpp"
 
 int main() {
-    try {
-        std::string address = "127.0.0.1:8090";
-        std::string stream = "example-stream";
-        std::string topic = "example-topic";
-        std::string username = "iggy";
-        std::string password = "iggy";
-        std::uint32_t count = 10;
-        std::uint32_t stream_count = 5;
-        std::uint32_t partitions_per_stream = 2;
+	const std::string address = "127.0.0.1:8090";
+	const std::string stream = "example-stream";
+	const std::string topic = "example-topic";
+	const int count = 5;
 
-        auto client = iggy::IggyClient::Builder.create_client(address).connect().login_user(username, password);
+	auto [client, result] = iggy::Client::create(address);
+	if (!result.ok() || !client) {
+		std::cerr << "Failed to create client: " << result.error_message << "\n";
+		return 1;
+	}
 
-        iggy::Identifier topic_id = iggy::Identifier::named(topic);
+	result = client->connect();
+	if (!result.ok()) {
+		std::cerr << "Failed to connect: " << result.error_message << "\n";
+		return 1;
+	}
 
-        std::uint32_t total_partitions = stream_count * partitions_per_stream;
-        std::uint32_t messages_per_partition = count / total_partitions;
+	result = client->login_user("iggy", "iggy");
+	if (!result.ok()) {
+		std::cerr << "Login failed: " << result.error_message << "\n";
+		return 1;
+	}
 
-        std::uint32_t message_number = 1;
-        for (std::uint32_t stream_index = 0; stream_index < stream_count; ++stream_index) {
-            std::string stream_name = stream + "-" + std::to_string(stream_index + 1);
-            auto stream_id = iggy::Identifier::named(stream_name);
+	iggy::ffi::FfiIdentifier stream_id;
+	iggy::ffi::FfiIdentifier topic_id;
+	try {
+		stream_id = iggy::Identifier::from_name(stream);
+		topic_id = iggy::Identifier::from_name(topic);
+	} catch (const std::exception& e) {
+		std::cerr << "Invalid stream/topic identifier: " << e.what() << "\n";
+		return 1;
+	}
 
-            try {
-                client.create_stream(stream_name);
-            } catch (const std::exception& err) {
-                std::cerr << "create_stream: " << err.what() << '\n';
-            }
+	result = client->create_stream(stream);
+	if (!result.ok()) {
+		std::cerr << "Create stream: " << result.error_message << "\n";
+	}
 
-            try {
-                client.create_topic(stream_id, topic, partitions_per_stream, iggy::CompressionAlgorithm::None, 0);
-            } catch (const std::exception& err) {
-                std::cerr << "create_topic: " << err.what() << '\n';
-            }
+	result = client->create_topic(stream_id, topic, 1);
+	if (!result.ok()) {
+		std::cerr << "Create topic: " << result.error_message << "\n";
+	}
 
-            for (std::uint32_t partition_id = 0; partition_id < partitions_per_stream; ++partition_id) {
-                std::vector<iggy::IggyMessage> messages;
-                messages.reserve(messages_per_partition);
-                for (std::uint32_t i = 0; i < messages_per_partition; ++i) {
-                    std::string payload = "message-" + std::to_string(message_number++);
-                    messages.emplace_back(iggy::IggyMessage::Builder()
-                                              .payload(payload)
-                                              .header("source", "cpp-example")
-                                              .header("message-id", payload));
-                }
+	std::unordered_map<std::string, iggy::HeaderValue> headers;
+	headers.emplace("trace_id", iggy::HeaderValue::String("req-123"));
+	headers.emplace("count", iggy::HeaderValue::Uint32(42));
+	headers.emplace("is_urgent", iggy::HeaderValue::Bool(true));
 
-                client.send_messages(stream_id, topic_id, iggy::Partitioning(partition_id), messages);
-                std::cout << "Sent " << messages_per_partition << " messages to " << stream_name << "/" << topic
-                          << " partition " << partition_id << ".\n";
-            }
-        }
-        return 0;
-    } catch (const std::exception& err) {
-        std::cerr << "Error: " << err.what() << '\n';
-    }
-    return 1;
+	iggy::MessageBatchBuilder batch;
+	batch.reserve(static_cast<size_t>(count));
+	for (int i = 0; i < count; ++i) {
+		iggy::MessageBuilder builder;
+		std::string payload = "message-" + std::to_string(i);
+		batch.add(builder.payload(payload).user_headers(headers).build());
+	}
+	auto messages = batch.build();
+	auto message_count = messages.size();
+
+	result = client->send_messages(stream_id, topic_id, 0, std::move(messages));
+	if (!result.ok()) {
+		std::cerr << "Send messages failed: " << result.error_message << "\n";
+		return 1;
+	}
+
+	std::cout << "Sent " << message_count << " messages to " << stream << "/" << topic << ".\n";
+	return 0;
 }

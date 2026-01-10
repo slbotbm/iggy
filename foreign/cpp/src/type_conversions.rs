@@ -60,6 +60,16 @@ fn ffi_polling_kind_to_rust(kind: ffi::FfiPollingKind) -> Result<RustPollingKind
     }
 }
 
+pub(crate) fn ffi_compression_to_rust(
+    compression: ffi::FfiCompressionAlgorithm,
+) -> Result<RustCompressionAlgorithm, RustIggyError> {
+    match compression {
+        ffi::FfiCompressionAlgorithm::None => Ok(RustCompressionAlgorithm::None),
+        ffi::FfiCompressionAlgorithm::Gzip => Ok(RustCompressionAlgorithm::Gzip),
+        _ => Err(RustIggyError::InvalidFormat),
+    }
+}
+
 fn rust_header_kind_to_ffi(kind: RustHeaderKind) -> Result<ffi::FfiHeaderKind, RustIggyError> {
     match kind {
         RustHeaderKind::Raw => Ok(ffi::FfiHeaderKind::Raw),
@@ -153,9 +163,9 @@ pub(crate) fn ffi_max_topic_size_to_rust(
     match size.kind {
         ffi::FfiMaxTopicSizeKind::ServerDefault => Ok(RustMaxTopicSize::ServerDefault),
         ffi::FfiMaxTopicSizeKind::Unlimited => Ok(RustMaxTopicSize::Unlimited),
-        ffi::FfiMaxTopicSizeKind::Custom => Ok(RustMaxTopicSize::Custom(
-            RustIggyByteSize::from(size.value.value),
-        )),
+        ffi::FfiMaxTopicSizeKind::Custom => Ok(RustMaxTopicSize::Custom(RustIggyByteSize::from(
+            size.value.value,
+        ))),
         _ => Err(RustIggyError::InvalidFormat),
     }
 }
@@ -309,6 +319,26 @@ pub(crate) fn ffi_header_map_to_rust(
     Ok(headers)
 }
 
+pub(crate) fn ffi_header_map_to_rust_owned(
+    map: ffi::FfiHeaderMap,
+) -> Result<HashMap<RustHeaderKey, RustHeaderValue>, RustIggyError> {
+    let mut headers = HashMap::with_capacity(map.entries.len());
+    for entry in map.entries {
+        let key = RustHeaderKey::new(&entry.key.value)?;
+        let kind = ffi_header_kind_to_rust(entry.value.kind)?;
+        if entry.value.value.is_empty() || entry.value.value.len() > 255 {
+            return Err(RustIggyError::InvalidFormat);
+        }
+        let value = RustHeaderValue {
+            kind,
+            value: Bytes::from(entry.value.value),
+        };
+        headers.insert(key, value);
+    }
+
+    Ok(headers)
+}
+
 pub(crate) fn rust_headers_to_ffi(
     headers: &HashMap<RustHeaderKey, RustHeaderValue>,
 ) -> Result<ffi::FfiHeaderMap, RustIggyError> {
@@ -363,6 +393,43 @@ pub(crate) fn ffi_message_to_rust(
     Ok(RustIggyMessage {
         header,
         payload: Bytes::from(message.payload.clone()),
+        user_headers,
+    })
+}
+
+pub(crate) fn ffi_message_to_rust_owned(
+    message: ffi::FfiIggyMessage,
+) -> Result<RustIggyMessage, RustIggyError> {
+    let id = ffi_id_to_u128(&message.header.id)?;
+    let payload_length =
+        u32::try_from(message.payload.len()).map_err(|_| RustIggyError::InvalidFormat)?;
+
+    let headers = ffi_header_map_to_rust_owned(message.headers)?;
+    let user_headers = if headers.is_empty() {
+        None
+    } else {
+        Some(headers.to_bytes())
+    };
+    let user_headers_len = user_headers.as_ref().map(|h| h.len()).unwrap_or(0);
+    if user_headers_len > MAX_USER_HEADERS_SIZE as usize {
+        return Err(RustIggyError::InvalidFormat);
+    }
+    let user_headers_length =
+        u32::try_from(user_headers_len).map_err(|_| RustIggyError::InvalidFormat)?;
+
+    let header = RustIggyMessageHeader {
+        checksum: message.header.checksum,
+        id,
+        offset: message.header.offset,
+        timestamp: message.header.timestamp,
+        origin_timestamp: message.header.origin_timestamp,
+        user_headers_length,
+        payload_length,
+    };
+
+    Ok(RustIggyMessage {
+        header,
+        payload: Bytes::from(message.payload),
         user_headers,
     })
 }
