@@ -33,7 +33,7 @@ RUST_LIB := $(TARGET_DIR)/libiggy_cpp.a
 CXXBRIDGE_INCLUDE = $(shell ls -d $(TARGET_DIR)/build/iggy-cpp-*/out/cxxbridge/include 2>/dev/null | head -n 1)
 PUBLIC_INCLUDE_DIR := include
 EXAMPLES_DIR := target/examples
-CPP_SOURCES := src/iggy_client.cpp
+CPP_SOURCES :=
 
 PRODUCER_SRC := examples/producer/producer.cpp
 CONSUMER_SRC := examples/consumer/consumer.cpp

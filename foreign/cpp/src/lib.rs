@@ -36,7 +36,7 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
 #[cxx::bridge(namespace = "iggy::ffi")]
 mod ffi {
 
-    enum FfiHeaderKind {
+    enum HeaderKind {
         Raw = 1,
         String = 2,
         Bool = 3,
@@ -54,29 +54,29 @@ mod ffi {
         Float64 = 15,
     }
 
-    enum FfiIdKind {
+    enum IdKind {
         Numeric = 1,
         String = 2,
     }
 
-    enum FfiCompressionAlgorithm {
+    enum CompressionAlgorithm {
         None = 1,
         Gzip = 2,
     }
 
-    enum FfiIggyExpiryKind {
+    enum IggyExpiryKind {
         ServerDefault = 1,
         ExpireDuration = 2,
         NeverExpire = 3,
     }
 
-    enum FfiMaxTopicSizeKind {
+    enum MaxTopicSizeKind {
         ServerDefault = 1,
         Custom = 2,
         Unlimited = 3,
     }
 
-    enum FfiPollingKind {
+    enum PollingKind {
         Offset = 1,
         Timestamp = 2,
         First = 3,
@@ -84,25 +84,25 @@ mod ffi {
         Next = 5,
     }
 
-    struct FfiHeaderValue {
-        kind: FfiHeaderKind,
+    struct HeaderValue {
+        kind: HeaderKind,
         value: Vec<u8>,
     }
 
-    struct FfiHeaderKey {
+    struct HeaderKey {
         value: String,
     }
 
-    struct FfiHeaderEntry {
-        key: FfiHeaderKey,
-        value: FfiHeaderValue,
+    struct HeaderEntry {
+        key: HeaderKey,
+        value: HeaderValue,
     }
 
-    struct FfiHeaderMap {
-        entries: Vec<FfiHeaderEntry>,
+    struct HeaderMap {
+        entries: Vec<HeaderEntry>,
     }
 
-    struct FfiIggyMessageHeader {
+    struct IggyMessageHeader {
         checksum: u64,
         id: Vec<u8>,
         offset: u64,
@@ -112,88 +112,88 @@ mod ffi {
         payload_length: u32,
     }
 
-    struct FfiIdentifier {
-        kind: FfiIdKind,
+    struct Identifier {
+        kind: IdKind,
         length: u8,
         value: Vec<u8>,
     }
 
-    struct FfiIggyExpiry {
-        kind: FfiIggyExpiryKind,
+    struct IggyExpiry {
+        kind: IggyExpiryKind,
         value: u64,
     }
 
-    struct FfiIggyTimestamp {
+    struct IggyTimestamp {
         value: u64,
     }
 
-    struct FfiIggyByteSize {
+    struct IggyByteSize {
         value: u64,
     }
 
-    struct FfiMaxTopicSize {
-        kind: FfiMaxTopicSizeKind,
-        value: FfiIggyByteSize,
+    struct MaxTopicSize {
+        kind: MaxTopicSizeKind,
+        value: IggyByteSize,
     }
 
-    struct FfiPollingStrategy {
-        kind: FfiPollingKind,
+    struct PollingStrategy {
+        kind: PollingKind,
         value: u64,
     }
 
-    struct FfiIggyMessage {
-        header: FfiIggyMessageHeader,
+    struct IggyMessage {
+        header: IggyMessageHeader,
         payload: Vec<u8>,
-        headers: FfiHeaderMap,
+        headers: HeaderMap,
     }
 
-    struct FfiPartition {
+    struct Partition {
         id: u32,
-        created_at: FfiIggyTimestamp,
+        created_at: IggyTimestamp,
         segments_count: u32,
         current_offset: u64,
-        size: FfiIggyByteSize,
+        size: IggyByteSize,
         messages_count: u64,
     }
 
-    struct FfiTopic {
+    struct Topic {
         id: u32,
-        created_at: FfiIggyTimestamp,
+        created_at: IggyTimestamp,
         name: String,
-        size: FfiIggyByteSize,
-        message_expiry: FfiIggyExpiry,
-        compression_algorithm: FfiCompressionAlgorithm,
-        max_topic_size: FfiMaxTopicSize,
+        size: IggyByteSize,
+        message_expiry: IggyExpiry,
+        compression_algorithm: CompressionAlgorithm,
+        max_topic_size: MaxTopicSize,
         replication_factor: u8,
         messages_count: u64,
         partitions_count: u32,
     }
 
-    struct FfiStreamDetails {
+    struct StreamDetails {
         id: u32,
-        created_at: FfiIggyTimestamp,
+        created_at: IggyTimestamp,
         name: String,
-        size: FfiIggyByteSize,
+        size: IggyByteSize,
         messages_count: u64,
         topics_count: u32,
-        topics: Vec<FfiTopic>,
+        topics: Vec<Topic>,
     }
 
-    struct FfiTopicDetails {
+    struct TopicDetails {
         id: u32,
-        created_at: FfiIggyTimestamp,
+        created_at: IggyTimestamp,
         name: String,
-        size: FfiIggyByteSize,
-        message_expiry: FfiIggyExpiry,
-        compression_algorithm: FfiCompressionAlgorithm,
-        max_topic_size: FfiMaxTopicSize,
+        size: IggyByteSize,
+        message_expiry: IggyExpiry,
+        compression_algorithm: CompressionAlgorithm,
+        max_topic_size: MaxTopicSize,
         replication_factor: u8,
         messages_count: u64,
         partitions_count: u32,
-        partitions: Vec<FfiPartition>,
+        partitions: Vec<Partition>,
     }
 
-    struct FfiIggyError {
+    struct IggyError {
         code: u32,
         message: String,
     }
@@ -209,48 +209,48 @@ mod ffi {
         fn ping(self: &IggyClient) -> Result<()>;
 
         fn create_stream(self: &IggyClient, name: &str) -> Result<()>;
-        fn get_stream(self: &IggyClient, stream_id: &FfiIdentifier) -> Result<FfiStreamDetails>;
+        fn get_stream(self: &IggyClient, stream_id: &Identifier) -> Result<StreamDetails>;
         fn create_topic(
             self: &IggyClient,
-            stream: &FfiIdentifier,
+            stream: &Identifier,
             name: &str,
             partitions_count: u32,
-            compression_algorithm: FfiCompressionAlgorithm,
+            compression_algorithm: CompressionAlgorithm,
             replication_factor: u8,
-            message_expiry: &FfiIggyExpiry,
-            max_topic_size: &FfiMaxTopicSize,
+            message_expiry: &IggyExpiry,
+            max_topic_size: &MaxTopicSize,
         ) -> Result<()>;
         fn get_topic(
             self: &IggyClient,
-            stream_id: &FfiIdentifier,
-            topic_id: &FfiIdentifier,
-        ) -> Result<FfiTopicDetails>;
+            stream_id: &Identifier,
+            topic_id: &Identifier,
+        ) -> Result<TopicDetails>;
         fn send_messages(
             self: &IggyClient,
-            stream_id: &FfiIdentifier,
-            topic_id: &FfiIdentifier,
+            stream_id: &Identifier,
+            topic_id: &Identifier,
             partitioning: u32,
-            messages: Vec<FfiIggyMessage>,
+            messages: Vec<IggyMessage>,
         ) -> Result<()>;
         fn poll_messages(
             self: &IggyClient,
-            stream_id: &FfiIdentifier,
-            topic_id: &FfiIdentifier,
+            stream_id: &Identifier,
+            topic_id: &Identifier,
             partition_id: u32,
-            polling_strategy: &FfiPollingStrategy,
+            polling_strategy: &PollingStrategy,
             count: u32,
             auto_commit: bool,
-        ) -> Result<Vec<FfiIggyMessage>>;
+        ) -> Result<Vec<IggyMessage>>;
     }
 }
 
-impl fmt::Display for ffi::FfiIggyError {
+impl fmt::Display for ffi::IggyError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}: {}", self.code, self.message)
     }
 }
 
-impl From<RustIggyError> for ffi::FfiIggyError {
+impl From<RustIggyError> for ffi::IggyError {
     fn from(error: RustIggyError) -> Self {
         Self {
             code: error.as_code(),
@@ -263,7 +263,7 @@ pub struct IggyClient {
     inner: Arc<RustIggyClient>,
 }
 
-fn create_client(conn: &str) -> Result<Box<IggyClient>, ffi::FfiIggyError> {
+fn create_client(conn: &str) -> Result<Box<IggyClient>, ffi::IggyError> {
     let conn = if conn.is_empty() {
         "127.0.0.1:8090".to_string()
     } else {
@@ -281,25 +281,25 @@ fn create_client(conn: &str) -> Result<Box<IggyClient>, ffi::FfiIggyError> {
 }
 
 impl IggyClient {
-    fn login_user(&self, username: &str, password: &str) -> Result<(), ffi::FfiIggyError> {
+    fn login_user(&self, username: &str, password: &str) -> Result<(), ffi::IggyError> {
         RUNTIME.block_on(async { self.inner.login_user(username, password).await })?;
 
         Ok(())
     }
 
-    fn connect(&self) -> Result<(), ffi::FfiIggyError> {
+    fn connect(&self) -> Result<(), ffi::IggyError> {
         RUNTIME.block_on(async { self.inner.connect().await })?;
 
         Ok(())
     }
 
-    fn ping(&self) -> Result<(), ffi::FfiIggyError> {
+    fn ping(&self) -> Result<(), ffi::IggyError> {
         RUNTIME.block_on(async { self.inner.ping().await })?;
 
         Ok(())
     }
 
-    fn create_stream(&self, name: &str) -> Result<(), ffi::FfiIggyError> {
+    fn create_stream(&self, name: &str) -> Result<(), ffi::IggyError> {
         RUNTIME.block_on(async { self.inner.create_stream(name).await })?;
 
         Ok(())
@@ -307,8 +307,8 @@ impl IggyClient {
 
     fn get_stream(
         &self,
-        stream_id: &ffi::FfiIdentifier,
-    ) -> Result<ffi::FfiStreamDetails, ffi::FfiIggyError> {
+        stream_id: &ffi::Identifier,
+    ) -> Result<ffi::StreamDetails, ffi::IggyError> {
         let stream_id = type_conversions::ffi_identifier_to_rust(stream_id)?;
         let details = RUNTIME.block_on(async { self.inner.get_stream(&stream_id).await })?;
 
@@ -320,14 +320,14 @@ impl IggyClient {
 
     fn create_topic(
         &self,
-        stream: &ffi::FfiIdentifier,
+        stream: &ffi::Identifier,
         name: &str,
         partitions_count: u32,
-        compression_algorithm: ffi::FfiCompressionAlgorithm,
+        compression_algorithm: ffi::CompressionAlgorithm,
         replication_factor: u8,
-        message_expiry: &ffi::FfiIggyExpiry,
-        max_topic_size: &ffi::FfiMaxTopicSize,
-    ) -> Result<(), ffi::FfiIggyError> {
+        message_expiry: &ffi::IggyExpiry,
+        max_topic_size: &ffi::MaxTopicSize,
+    ) -> Result<(), ffi::IggyError> {
         let stream = type_conversions::ffi_identifier_to_rust(stream)?;
         let compression = type_conversions::ffi_compression_to_rust(compression_algorithm)?;
 
@@ -359,9 +359,9 @@ impl IggyClient {
 
     fn get_topic(
         &self,
-        stream_id: &ffi::FfiIdentifier,
-        topic_id: &ffi::FfiIdentifier,
-    ) -> Result<ffi::FfiTopicDetails, ffi::FfiIggyError> {
+        stream_id: &ffi::Identifier,
+        topic_id: &ffi::Identifier,
+    ) -> Result<ffi::TopicDetails, ffi::IggyError> {
         let stream_id = type_conversions::ffi_identifier_to_rust(stream_id)?;
         let topic_id = type_conversions::ffi_identifier_to_rust(topic_id)?;
         let details =
@@ -374,17 +374,17 @@ impl IggyClient {
 
     fn send_messages(
         &self,
-        stream_id: &ffi::FfiIdentifier,
-        topic_id: &ffi::FfiIdentifier,
+        stream_id: &ffi::Identifier,
+        topic_id: &ffi::Identifier,
         partitioning: u32,
-        messages: Vec<ffi::FfiIggyMessage>,
-    ) -> Result<(), ffi::FfiIggyError> {
+        messages: Vec<ffi::IggyMessage>,
+    ) -> Result<(), ffi::IggyError> {
         let stream = type_conversions::ffi_identifier_to_rust(stream_id)?;
         let topic = type_conversions::ffi_identifier_to_rust(topic_id)?;
         let partitioning = Partitioning::partition_id(partitioning);
         let mut rust_messages: Vec<RustIggyMessage> = Vec::with_capacity(messages.len());
         for message in messages {
-            rust_messages.push(type_conversions::ffi_message_to_rust_owned(message)?);
+            rust_messages.push(type_conversions::ffi_message_to_rust(message)?);
         }
 
         RUNTIME.block_on(async {
@@ -398,13 +398,13 @@ impl IggyClient {
 
     fn poll_messages(
         &self,
-        stream_id: &ffi::FfiIdentifier,
-        topic_id: &ffi::FfiIdentifier,
+        stream_id: &ffi::Identifier,
+        topic_id: &ffi::Identifier,
         partition_id: u32,
-        polling_strategy: &ffi::FfiPollingStrategy,
+        polling_strategy: &ffi::PollingStrategy,
         count: u32,
         auto_commit: bool,
-    ) -> Result<Vec<ffi::FfiIggyMessage>, ffi::FfiIggyError> {
+    ) -> Result<Vec<ffi::IggyMessage>, ffi::IggyError> {
         let stream = type_conversions::ffi_identifier_to_rust(stream_id)?;
         let topic = type_conversions::ffi_identifier_to_rust(topic_id)?;
         let consumer = RustConsumer::default();

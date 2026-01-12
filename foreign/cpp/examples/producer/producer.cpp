@@ -13,62 +13,110 @@ int main() {
 	const std::string topic = "example-topic";
 	const int count = 5;
 
-	auto [client, result] = iggy::Client::create(address);
-	if (!result.ok() || !client) {
-		std::cerr << "Failed to create client: " << result.error_message << "\n";
-		return 1;
-	}
-
-	result = client->connect();
-	if (!result.ok()) {
-		std::cerr << "Failed to connect: " << result.error_message << "\n";
-		return 1;
-	}
-
-	result = client->login_user("iggy", "iggy");
-	if (!result.ok()) {
-		std::cerr << "Login failed: " << result.error_message << "\n";
-		return 1;
-	}
-
-	iggy::ffi::FfiIdentifier stream_id;
-	iggy::ffi::FfiIdentifier topic_id;
+	std::unique_ptr<iggy::IggyClient> client;
 	try {
-		stream_id = iggy::Identifier::from_name(stream);
-		topic_id = iggy::Identifier::from_name(topic);
+		client = iggy::IggyClient::new_client(address);
+	} catch (const iggy::IggyException& e) {
+		std::cerr << "Failed to create client: [" << e.error().code << "] " << e.what() << "\n";
+		return 1;
+	} catch (const std::exception& e) {
+		std::cerr << "Failed to create client: " << e.what() << "\n";
+		return 1;
+	}
+
+	try {
+		client->connect();
+	} catch (const iggy::IggyException& e) {
+		std::cerr << "Failed to connect: [" << e.error().code << "] " << e.what() << "\n";
+		return 1;
+	} catch (const std::exception& e) {
+		std::cerr << "Failed to connect: " << e.what() << "\n";
+		return 1;
+	}
+
+	try {
+		client->login_user("iggy", "iggy");
+	} catch (const iggy::IggyException& e) {
+		std::cerr << "Login failed: [" << e.error().code << "] " << e.what() << "\n";
+		return 1;
+	} catch (const std::exception& e) {
+		std::cerr << "Login failed: " << e.what() << "\n";
+		return 1;
+	}
+
+	iggy::Identifier stream_id;
+	iggy::Identifier topic_id;
+	try {
+		stream_id = iggy::identifier::from_name(stream);
+		topic_id = iggy::identifier::from_name(topic);
 	} catch (const std::exception& e) {
 		std::cerr << "Invalid stream/topic identifier: " << e.what() << "\n";
 		return 1;
 	}
 
-	result = client->create_stream(stream);
-	if (!result.ok()) {
-		std::cerr << "Create stream: " << result.error_message << "\n";
+	try {
+		client->create_stream(stream);
+	} catch (const iggy::IggyException& e) {
+		std::cerr << "Create stream: [" << e.error().code << "] " << e.what() << "\n";
+	} catch (const std::exception& e) {
+		std::cerr << "Create stream: " << e.what() << "\n";
 	}
 
-	result = client->create_topic(stream_id, topic, 1);
-	if (!result.ok()) {
-		std::cerr << "Create topic: " << result.error_message << "\n";
+	try {
+		client->create_topic(stream_id, topic, 1);
+	} catch (const iggy::IggyException& e) {
+		std::cerr << "Create topic: [" << e.error().code << "] " << e.what() << "\n";
+	} catch (const std::exception& e) {
+		std::cerr << "Create topic: " << e.what() << "\n";
 	}
+
+	auto header_string = [](std::string_view value) {
+		iggy::HeaderValue header;
+		header.kind = iggy::HeaderKind::String;
+		header.value.reserve(value.size());
+		for (char c : value) {
+			header.value.push_back(static_cast<uint8_t>(c));
+		}
+		return header;
+	};
+	auto header_bool = [](bool value) {
+		iggy::HeaderValue header;
+		header.kind = iggy::HeaderKind::Bool;
+		header.value.push_back(static_cast<uint8_t>(value ? 1 : 0));
+		return header;
+	};
+	auto header_uint32 = [](uint32_t value) {
+		iggy::HeaderValue header;
+		header.kind = iggy::HeaderKind::Uint32;
+		header.value.reserve(sizeof(uint32_t));
+		for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+			header.value.push_back(static_cast<uint8_t>((value >> (i * 8)) & 0xFF));
+		}
+		return header;
+	};
 
 	std::unordered_map<std::string, iggy::HeaderValue> headers;
-	headers.emplace("trace_id", iggy::HeaderValue::String("req-123"));
-	headers.emplace("count", iggy::HeaderValue::Uint32(42));
-	headers.emplace("is_urgent", iggy::HeaderValue::Bool(true));
+	headers.emplace("trace_id", header_string("req-123"));
+	headers.emplace("count", header_uint32(42));
+	headers.emplace("is_urgent", header_bool(true));
 
-	iggy::MessageBatchBuilder batch;
+	iggy::IggyMessageBatchBuilder batch;
 	batch.reserve(static_cast<size_t>(count));
 	for (int i = 0; i < count; ++i) {
-		iggy::MessageBuilder builder;
+		iggy::IggyMessageBuilder builder;
 		std::string payload = "message-" + std::to_string(i);
-		batch.add(builder.payload(payload).user_headers(headers).build());
+		batch.add_message(builder.payload(payload).user_headers(headers).build());
 	}
 	auto messages = batch.build();
 	auto message_count = messages.size();
 
-	result = client->send_messages(stream_id, topic_id, 0, std::move(messages));
-	if (!result.ok()) {
-		std::cerr << "Send messages failed: " << result.error_message << "\n";
+	try {
+		client->send_messages(stream_id, topic_id, 0, std::move(messages));
+	} catch (const iggy::IggyException& e) {
+		std::cerr << "Send messages failed: [" << e.error().code << "] " << e.what() << "\n";
+		return 1;
+	} catch (const std::exception& e) {
+		std::cerr << "Send messages failed: " << e.what() << "\n";
 		return 1;
 	}
 
