@@ -1,0 +1,135 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+licenses(["notice"])
+
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_import", "cc_library")
+
+genrule(
+    name = "cargo_build_debug",
+    srcs = glob([
+        "src/**/*.rs",
+    ]) + [
+        "Cargo.toml",
+        "Cargo.lock",
+        "build.rs",
+    ],
+    outs = [
+        "rust_lib.a",
+        "src/lib.rs.h",
+        "cxxbridge/rust/cxx.h",
+    ],
+    cmd = """
+        set -e
+        EXECROOT=$$(pwd)
+        OUTPUT_LIB=$(location rust_lib.a)
+        OUTPUT_SRC_H=$(location src/lib.rs.h)
+        OUTPUT_CXX_H=$(location cxxbridge/rust/cxx.h)
+        SANDBOX_CARGO=$(location Cargo.toml)
+        REAL_CARGO=$$(readlink -f $$SANDBOX_CARGO 2>/dev/null || python3 -c "import os; print(os.path.realpath('$$SANDBOX_CARGO'))")
+        CARGO_DIR=$$(dirname $$REAL_CARGO)
+        WORKSPACE_ROOT=$$(cd $$CARGO_DIR && pwd)
+        if [ ! -f $$WORKSPACE_ROOT/Cargo.toml ]; then
+            echo "Error: Cannot find workspace root Cargo.toml at $$WORKSPACE_ROOT" >&2
+            exit 1
+        fi
+        cd $$WORKSPACE_ROOT
+        cargo build --manifest-path $$CARGO_DIR/Cargo.toml
+        CARGO_TARGET_DIR=$$WORKSPACE_ROOT/target
+        RUST_BRIDGE_DIR=$$CARGO_TARGET_DIR/cxxbridge/iggy-cpp/src
+        RUST_LIB=$$CARGO_TARGET_DIR/debug/libiggy_cpp.a
+        if [ ! -f $$RUST_LIB ]; then
+            echo "Error: Rust library not found at $$RUST_LIB" >&2
+            exit 1
+        fi
+        if [ ! -f $$RUST_BRIDGE_DIR/lib.rs.h ]; then
+            echo "Error: cxxbridge header file not found at $$RUST_BRIDGE_DIR/lib.rs.h" >&2
+            exit 1
+        fi
+        cd $$EXECROOT
+        mkdir -p $$(dirname $$OUTPUT_SRC_H) $$(dirname $$OUTPUT_CXX_H)
+        cp -f $$RUST_LIB $$OUTPUT_LIB || (echo "Failed to copy $$RUST_LIB to $$OUTPUT_LIB" >&2; exit 1)
+        cp -f $$RUST_BRIDGE_DIR/lib.rs.h $$OUTPUT_SRC_H || (echo "Failed to copy $$RUST_BRIDGE_DIR/lib.rs.h to $$OUTPUT_SRC_H" >&2; exit 1)
+        CXX_H_SOURCE=$$CARGO_TARGET_DIR/cxxbridge/rust/cxx.h
+        if [ ! -f $$CXX_H_SOURCE ] && [ ! -L $$CXX_H_SOURCE ]; then
+            echo "Error: cxx.h not found at $$CXX_H_SOURCE" >&2
+            exit 1
+        fi
+        cp -f -L $$CXX_H_SOURCE $$OUTPUT_CXX_H || (echo "Failed to copy $$CXX_H_SOURCE to $$OUTPUT_CXX_H" >&2; exit 1)
+    """,
+    message = "Building Rust library (debug) with cargo...",
+    local = 1,
+)
+
+cc_import(
+    name = "rust_lib",
+    static_library = ":rust_lib.a",
+    alwayslink = True,
+)
+
+cc_library(
+    name = "iggy-cpp",
+    hdrs = [
+        ":src/lib.rs.h",
+        ":cxxbridge/rust/cxx.h",
+    ],
+    copts = [
+        "-std=c++17",
+        "-g3",
+        "-O0",
+        "-ggdb",
+        "-fno-omit-frame-pointer",
+        "-DDEBUG",
+    ],
+    includes = [
+        "src",
+        "cxxbridge",
+    ],
+    linkopts = [
+        "-ldl",
+        "-lpthread",
+        "-g",
+    ] + select({
+        "@platforms//os:macos": [
+            "-framework",
+            "CoreFoundation",
+            "-framework",
+            "Security",
+        ],
+        "//conditions:default": [],
+    }),
+    deps = [":rust_lib"],
+    visibility = ["//visibility:public"],
+)
+
+cc_binary(
+    name = "iggy-cpp-example",
+    srcs = [
+        "examples/example.cpp",
+    ],
+    deps = [":iggy-cpp"],
+    copts = [
+        "-std=c++17",
+        "-g3",
+        "-O0",
+        "-ggdb",
+        "-fno-omit-frame-pointer",
+        "-DDEBUG",
+    ],
+    linkopts = ["-g"],
+    visibility = ["//visibility:public"],
+)
