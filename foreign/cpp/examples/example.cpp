@@ -15,29 +15,43 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include "iggy.hpp"
 #include <iostream>
-#include <memory>
+#include <vector>
 
-#include "lib.rs.h"
-#include "rust/cxx.h"
-
-struct IggyClientDeleter {
-	void operator()(iggy::IggyClient* client) const noexcept { iggy::delete_connection(client); }
-};
-
-int main() {
+int
+main()
+{
 	try {
-		std::unique_ptr<iggy::IggyClient, IggyClientDeleter> client(iggy::new_connection("127.0.0.1:8090"));
+		auto client = iggy::IggyClient::new_connection("127.0.0.1:8090");
+		client.connect();
+		client.login_user("iggy", "iggy");
 
-		client->connect();
-		client->login_user("iggy", "iggy");
-		client->create_stream("sample-stream");
-		const iggy::Expiry expiry{iggy::ExpiryKind::NeverExpire, 0};
-		const iggy::MaxTopicSize max_topic_size{iggy::MaxTopicSizeKind::ServerDefault, 0};
-		client->create_topic("sample-stream", "sample-topic", 1, iggy::CompressionAlgorithm::Gzip, 1, expiry,
-							 max_topic_size);
+		std::string_view stream_name = "sample-stream";
+		std::string_view topic_name = "sample-topic";
+		const auto stream_id = iggy::Identifier::from_string(stream_name);
+		const auto topic_id = iggy::Identifier::from_string(topic_name);
+
+		client.create_stream(stream_name);
+		client.create_topic(stream_id,
+							topic_name,
+							1,
+							iggy::CompressionAlgorithm::gzip(),
+							1,
+							iggy::Expiry::never_expire(),
+							iggy::MaxTopicSize::server_default());
 
 		std::cout << "stream and topic created" << std::endl;
+		std::vector<iggy::SentMessage> messages;
+		messages.reserve(1000000);
+		for (int i = 0; i < 1000000; ++i) {
+			const std::string payload = "message-" + std::to_string(i);
+			iggy::SentMessage message;
+			message.set_payload(payload);
+			messages.push_back(std::move(message));
+		}
+		client.send_messages(messages, stream_id, topic_id, 0);
+		std::cout << "sent messages" << std::endl;
 		return 0;
 	} catch (const rust::Error& err) {
 		std::cerr << "iggy error: " << err.what() << std::endl;

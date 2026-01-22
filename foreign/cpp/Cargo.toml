@@ -24,12 +24,11 @@ edition = "2024"
 crate-type = ["staticlib"]
 
 [dependencies]
-cxx = "1.0.192"
 anyhow = "1"
-iggy = { path = "../../core/sdk" }
-iggy_common = { path = "../../core/common" }
-tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros"] }
 bytes = "1.11.0"
+cxx = "1.0.192"
+iggy = { path = "../../core/sdk" }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros"] }
 
 [build-dependencies]
 cxx-build = "1.0"

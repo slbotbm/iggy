@@ -16,7 +16,7 @@
 # under the License.
 
 ---
-BasedOnStyle: Google
+BasedOnStyle: Mozilla
 IndentWidth: 4
 TabWidth: 4
 ColumnLimit: 120
@@ -24,3 +24,5 @@ AllowShortFunctionsOnASingleLine: Inline
 PointerAlignment: Left
 NamespaceIndentation: All
 UseTab: Always
+AccessModifierOffset: 0
+IndentAccessModifiers: true

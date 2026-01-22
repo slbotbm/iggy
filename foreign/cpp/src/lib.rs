@@ -14,15 +14,25 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
-mod type_conversions;
+mod client;
+mod identifier;
+mod stream_details;
+mod topic_details;
 
-use anyhow::Result;
+use client::{Client, delete_connection, new_connection};
+use identifier::{Identifier, delete_identifier, identifier_from_named, identifier_from_numeric};
+use stream_details::{StreamDetails, delete_stream_details};
+use topic_details::{TopicDetails, delete_topic_details};
+
+use anyhow::anyhow;
+use bytes::Bytes;
+use iggy::prelude::IggyError as RustIggyError;
 use iggy::prelude::{
-    Client, Identifier, IggyClient as RustIggyClient, IggyClientBuilder as RustIggyClientBuilder,
-    StreamClient, TopicClient, UserClient,
+    IggyMessage as RustMessage, IggyTimestamp, PolledMessages as RustPolledMessages, PollingKind,
+    PollingStrategy as RustPollingStrategy,
 };
 use std::str::FromStr;
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
 static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
@@ -31,132 +41,162 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
         .unwrap()
 });
 
-#[cxx::bridge(namespace = "iggy")]
+#[cxx::bridge(namespace = "iggy::ffi")]
 mod ffi {
-    enum CompressionAlgorithm {
-        None = 1,
-        Gzip = 2,
-    }
-
-    enum ExpiryKind {
-        ServerDefault = 0,
-        ExpireDuration = 1,
-        NeverExpire = 2,
-    }
-
-    struct Expiry {
-        kind: ExpiryKind,
+    struct PollingStrategy {
+        kind: String,
         value: u64,
     }
 
-    enum MaxTopicSizeKind {
-        ServerDefault = 0,
-        Custom = 1,
-        Unlimited = 2,
+    struct PolledMessage {
+        id_high: u64,
+        id_low: u64,
+        offset: u64,
+        timestamp: u64,
+        checksum: u64,
+        payload_length: u32,
+        payload: Vec<u8>,
     }
 
-    struct MaxTopicSize {
-        kind: MaxTopicSizeKind,
-        value: u64,
+    struct PolledMessages {
+        partition_id: u32,
+        current_offset: u64,
+        count: u32,
+        messages: Vec<PolledMessage>,
+    }
+
+    struct SentMessage {
+        payload: Vec<u8>,
     }
 
     extern "Rust" {
-        type IggyClient;
+        type Client;
+        type Identifier;
+        type StreamDetails;
+        type TopicDetails;
 
-        fn new_connection(connection_string: &str) -> Result<*mut IggyClient>;
-        unsafe fn delete_connection(client: *mut IggyClient);
-        fn login_user(self: &IggyClient, username: &str, password: &str) -> Result<()>;
-        fn connect(self: &IggyClient) -> Result<()>;
-        fn create_stream(self: &IggyClient, stream_name: &str) -> Result<()>;
+        // Client functions
+        fn new_connection(connection_string: &str) -> Result<*mut Client>;
+        fn login_user(self: &Client, username: &str, password: &str) -> Result<()>;
+        fn connect(self: &Client) -> Result<()>;
+        fn create_stream(self: &Client, stream_name: &str) -> Result<()>;
+        #[allow(clippy::too_many_arguments)]
         fn create_topic(
-            self: &IggyClient,
-            stream_id: &str,
+            self: &Client,
+            stream_id: &Identifier,
             name: &str,
             partitions_count: u32,
-            compression_algorithm: CompressionAlgorithm,
+            compression_algorithm: &str,
             replication_factor: u8,
-            expiry: Expiry,
-            max_topic_size: MaxTopicSize,
+            expiry: &str,
+            max_topic_size: &str,
         ) -> Result<()>;
+        fn send_messages(
+            self: &Client,
+            messages: Vec<SentMessage>,
+            stream_id: &Identifier,
+            topic: &Identifier,
+            partitioning: u32,
+        ) -> Result<()>;
+        fn poll_messages(
+            self: &Client,
+            stream_id: &Identifier,
+            topic: &Identifier,
+            partition_id: u32,
+            polling_strategy: PollingStrategy,
+            count: u32,
+            auto_commit: bool,
+        ) -> Result<PolledMessages>;
+        fn get_stream(self: &Client, stream_id: &Identifier) -> Result<*mut StreamDetails>;
+        fn get_topic(
+            self: &Client,
+            stream_id: &Identifier,
+            topic_id: &Identifier,
+        ) -> Result<*mut TopicDetails>;
+
+        // Identifier functions
+        fn identifier_from_named(identifier_name: &str) -> Result<*mut Identifier>;
+        fn identifier_from_numeric(identifier_id: u32) -> Result<*mut Identifier>;
+        fn get_value(self: &Identifier) -> String;
+
+        // StreamDetails functions
+        fn id(self: &StreamDetails) -> u32;
+        fn name(self: &StreamDetails) -> String;
+        fn messages_count(self: &StreamDetails) -> u64;
+        fn topics_count(self: &StreamDetails) -> u32;
+
+        // TopicDetails functions
+        fn id(self: &TopicDetails) -> u32;
+        fn name(self: &TopicDetails) -> String;
+        fn messages_count(self: &TopicDetails) -> u64;
+        fn partitions_count(self: &TopicDetails) -> u32;
+
+        // Destroyers
+        unsafe fn delete_connection(client: *mut Client);
+        unsafe fn delete_identifier(identifier: *mut Identifier);
+        unsafe fn delete_stream_details(details: *mut StreamDetails);
+        unsafe fn delete_topic_details(details: *mut TopicDetails);
+
     }
 }
 
-pub struct IggyClient {
-    inner: Arc<RustIggyClient>,
+fn iggy_error_to_anyhow(error: RustIggyError) -> anyhow::Error {
+    anyhow!("{}:{}", error.as_code(), error.as_string())
 }
 
-pub fn new_connection(connection_string: &str) -> Result<*mut IggyClient> {
-    let client = if connection_string.is_empty() {
-        RustIggyClientBuilder::new().with_tcp().build()?
-    } else if connection_string.starts_with("iggy://") || connection_string.starts_with("iggy+") {
-        RustIggyClient::from_connection_string(connection_string)?
-    } else {
-        RustIggyClientBuilder::new()
-            .with_tcp()
-            .with_server_address(connection_string.to_string())
-            .build()?
-    };
+impl From<&RustMessage> for ffi::PolledMessage {
+    fn from(message: &RustMessage) -> Self {
+        let id_high = (message.header.id >> 64) as u64;
+        let id_low = message.header.id as u64;
 
-    Ok(Box::into_raw(Box::new(IggyClient {
-        inner: Arc::new(client),
-    })))
-}
-
-impl IggyClient {
-    fn connect(&self) -> Result<()> {
-        RUNTIME.block_on(self.inner.connect())?;
-        Ok(())
-    }
-
-    fn login_user(&self, username: &str, password: &str) -> Result<()> {
-        RUNTIME.block_on(self.inner.login_user(username, password))?;
-        Ok(())
-    }
-
-    fn create_stream(&self, stream_name: &str) -> Result<()> {
-        RUNTIME.block_on(self.inner.create_stream(stream_name))?;
-        Ok(())
-    }
-
-    fn create_topic(
-        &self,
-        stream_id: &str,
-        name: &str,
-        partitions_count: u32,
-        compression_algorithm: ffi::CompressionAlgorithm,
-        replication_factor: u8,
-        expiry: ffi::Expiry,
-        max_topic_size: ffi::MaxTopicSize,
-    ) -> Result<()> {
-        let stream_id = Identifier::from_str(stream_id)?;
-        let compression_algorithm =
-            type_conversions::compression_algorithm_from_ffi(compression_algorithm)?;
-        let replication_factor = if replication_factor == 0 {
-            None
-        } else {
-            Some(replication_factor)
-        };
-        let expiry = type_conversions::expiry_from_ffi(expiry)?;
-        let max_topic_size = type_conversions::max_topic_size_from_ffi(max_topic_size)?;
-
-        RUNTIME.block_on(self.inner.create_topic(
-            &stream_id,
-            name,
-            partitions_count,
-            compression_algorithm,
-            replication_factor,
-            expiry,
-            max_topic_size,
-        ))?;
-        Ok(())
+        ffi::PolledMessage {
+            id_high,
+            id_low,
+            offset: message.header.offset,
+            timestamp: message.header.timestamp,
+            checksum: message.header.checksum,
+            payload_length: message.header.payload_length,
+            payload: message.payload.to_vec(),
+        }
     }
 }
 
-pub unsafe fn delete_connection(client: *mut IggyClient) {
-    if client.is_null() {
-        return;
+impl From<&RustPolledMessages> for ffi::PolledMessages {
+    fn from(polled_messages: &RustPolledMessages) -> Self {
+        let messages = polled_messages
+            .messages
+            .iter()
+            .map(ffi::PolledMessage::from)
+            .collect();
+
+        ffi::PolledMessages {
+            partition_id: polled_messages.partition_id,
+            current_offset: polled_messages.current_offset,
+            count: polled_messages.count,
+            messages,
+        }
     }
-    unsafe {
-        drop(Box::from_raw(client));
+}
+
+impl TryFrom<ffi::SentMessage> for RustMessage {
+    fn try_from(message: ffi::SentMessage) -> Result<Self, RustIggyError> {
+        let payload = Bytes::from(message.payload);
+        let message = RustMessage::builder().payload(payload).build()?;
+
+        Ok(message)
+    }
+}
+
+impl TryFrom<ffi::PollingStrategy> for RustPollingStrategy {
+    fn try_from(strategy: ffi::PollingStrategy) -> Result<Self, RustIggyError> {
+        match PollingKind::from_str(strategy.kind.as_str())? {
+            PollingKind::Offset => Ok(RustPollingStrategy::offset(strategy.value)),
+            PollingKind::Timestamp => Ok(RustPollingStrategy::timestamp(IggyTimestamp::from(
+                strategy.value,
+            ))),
+            PollingKind::First => Ok(RustPollingStrategy::first()),
+            PollingKind::Last => Ok(RustPollingStrategy::last()),
+            PollingKind::Next => Ok(RustPollingStrategy::next()),
+        }
     }
 }
