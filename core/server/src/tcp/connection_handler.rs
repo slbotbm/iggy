@@ -100,7 +100,7 @@ pub(crate) async fn handle_connection(
                 }
                 command::HandlerResult::Migrated { to_shard } => {
                     info!(
-                        "Command {cmd_code} was transfer to shard {to_shard}, session: {session}. TCP response was sent."
+                        "Command {cmd_code} was transferred to shard {to_shard}, session: {session}. TCP response was sent."
                     );
 
                     return Ok(ConnectionAction::Migrated { to_shard });
